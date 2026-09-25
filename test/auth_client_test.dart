@@ -9,6 +9,7 @@ import 'package:awesome_flutter_auth/src/http/token_storage.dart';
 import 'package:awesome_flutter_auth/src/auth_events.dart';
 import 'package:awesome_flutter_auth/src/auth_options.dart';
 import 'package:awesome_flutter_auth/src/auth_user.dart';
+import 'package:awesome_flutter_auth/src/models/auth_result.dart';
 import 'package:awesome_flutter_auth/src/models/session_info.dart';
 import 'package:awesome_flutter_auth/src/platform/native_auth_client.dart';
 
@@ -233,20 +234,77 @@ void main() {
   });
 
   group('AuthClient — 2FA TOTP', () {
-    test('setup2fa returns TotpSetupData', () async {
+    final setupUri = Uri.parse('https://api.example.com/auth/2fa/setup');
+    const otpauthUrl =
+        'otpauth://totp/awesome-node-auth:test%40example.com?secret=TOTP_SECRET&issuer=awesome-node-auth';
+
+    void stubSetup(int status, Map<String, dynamic> body) {
       when(() => mockClient.post(
-            Uri.parse('https://api.example.com/auth/2fa/setup'),
+            setupUri,
             headers: any(named: 'headers'),
             body: any(named: 'body'),
-          )).thenAnswer((_) async => jsonResponse(200, {
-            'secret': 'TOTP_SECRET',
-            'qrCode': 'data:image/png;base64,abc==',
-          }));
+          )).thenAnswer((_) async => jsonResponse(status, body));
+    }
+
+    test('setup2fa returns secret, otpauthUrl and qrCode (node shape)',
+        () async {
+      stubSetup(200, {
+        'secret': 'TOTP_SECRET',
+        'otpauthUrl': otpauthUrl,
+        'qrCode': 'data:image/png;base64,abc==',
+      });
 
       final result = await authClient.setup2fa();
 
       expect(result.success, isTrue);
       expect(result.data?.secret, equals('TOTP_SECRET'));
+      expect(result.data?.otpauthUrl, equals(otpauthUrl));
+      expect(result.data?.qrCode, equals('data:image/png;base64,abc=='));
+    });
+
+    // Issue #22: awesome-go-auth and awesome-lambda-auth send no qrCode.
+    test('setup2fa succeeds without qrCode and exposes otpauthUrl', () async {
+      stubSetup(200, {'secret': 'TOTP_SECRET', 'otpauthUrl': otpauthUrl});
+
+      final result = await authClient.setup2fa();
+
+      expect(result.success, isTrue);
+      expect(result.data?.secret, equals('TOTP_SECRET'));
+      expect(result.data?.otpauthUrl, equals(otpauthUrl));
+      expect(result.data?.qrCode, isNull);
+      verify(() => mockClient.post(
+            setupUri,
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).called(1);
+    });
+
+    test('setup2fa turns a response without secret into a failure', () async {
+      stubSetup(200, {'otpauthUrl': otpauthUrl});
+
+      final result = await authClient.setup2fa();
+
+      expect(result.success, isFalse);
+      expect(result.data, isNull);
+      expect(result.error, contains('secret'));
+    });
+
+    test('setup2fa turns fields of the wrong type into a failure', () async {
+      stubSetup(200, {'secret': 42, 'otpauthUrl': otpauthUrl});
+
+      final result = await authClient.setup2fa();
+
+      expect(result.success, isFalse);
+      expect(result.error, contains('secret'));
+    });
+
+    test('TotpSetupData.fromJson ignores optional fields of the wrong type', () {
+      final data = TotpSetupData.fromJson(
+          {'secret': 'TOTP_SECRET', 'otpauthUrl': 1, 'qrCode': false});
+
+      expect(data.secret, equals('TOTP_SECRET'));
+      expect(data.otpauthUrl, isNull);
+      expect(data.qrCode, isNull);
     });
   });
 

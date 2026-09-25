@@ -14,6 +14,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Fixed
 
 - `getActiveSessions()` no longer throws against a conforming server ([#21](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/21)). `SessionInfo.fromJson` reads `sessionHandle`, the key the servers send, with a fallback to `handle`; optional fields of an unexpected type become `null` instead of throwing, and an entry with no handle is skipped. `SessionInfo.toJson()` now writes `sessionHandle`. The `GET /sessions` and `DELETE /sessions/<handle>` requests are unchanged.
+- `setup2fa()` no longer throws when the server sends no `qrCode`, as awesome-go-auth and awesome-lambda-auth do ([#22](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/22)). A response without a `secret` string now comes back as `AuthResult.failure` instead of an exception. The `POST /2fa/setup` request is unchanged.
+
+### Added
+
+- `TotpSetupData.otpauthUrl`: the `otpauth://` provisioning URI that awesome-node-auth, awesome-go-auth and awesome-lambda-auth send, so an app can draw the QR code itself.
+
+### Migration
+
+- `TotpSetupData.qrCode` is now `String?` (it was `String`). Code that passes it where a `String` is expected, such as `Image.network(setup.data!.qrCode)`, needs a null check, with `otpauthUrl` as the fallback.
 
 ## 1.10.0
 

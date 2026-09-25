@@ -409,7 +409,14 @@ abstract class BaseAuthClient implements AuthClient {
     final response = await httpClient.apiPost('/2fa/setup');
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final data = _parseBody(response);
-      if (data != null) return AuthResult.success(TotpSetupData.fromJson(data));
+      if (data != null) {
+        try {
+          return AuthResult.success(TotpSetupData.fromJson(data));
+        } on FormatException catch (e) {
+          return AuthResult.failure(
+              'Unexpected 2FA setup response: ${e.message}');
+        }
+      }
     }
     return AuthResult.failure(_errorMessage(response));
   }

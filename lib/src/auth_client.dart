@@ -134,6 +134,11 @@ abstract class AuthClient {
   // TOTP (2FA)
   // ---------------------------------------------------------------------------
 
+  /// Starts TOTP enrolment: calls `POST $apiPrefix/2fa/setup`.
+  ///
+  /// On success the data carries the `secret`, the `otpauthUrl` and, when
+  /// the server renders one, the `qrCode`. A response with no `secret`
+  /// string is returned as a failure, not thrown.
   Future<AuthResult<TotpSetupData>> setup2fa();
   Future<AuthResult<void>> verify2faSetup(String code, String secret);
   Future<AuthResult<void>> validate2fa(String tempToken, String totpCode);

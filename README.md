@@ -327,11 +327,12 @@ if (result.success && !result.requires2fa) {
 ### TOTP
 
 ```dart
-// 1. Start setup — returns a QR code and secret
+// 1. Start setup — returns the secret, the otpauth:// URI and, from some servers, a QR code
 final setup = await auth.setup2fa();
 if (setup.success) {
-  final qrCode = setup.data!.qrCode;   // data URL — render with Image.network / Image.memory
-  final secret = setup.data!.secret;   // show as fallback text entry
+  final secret = setup.data!.secret;         // show as fallback text entry
+  final otpauthUrl = setup.data!.otpauthUrl; // otpauth://totp/… — render your own QR code from it
+  final qrCode = setup.data!.qrCode;         // PNG data URL, or null — see below
 }
 
 // 2. Confirm setup with the code from the authenticator app
@@ -349,6 +350,8 @@ if (validate.success) {
 // 4. Disable TOTP (requires active session)
 await auth.disable2fa();
 ```
+
+`qrCode` is a PNG data URL that awesome-node-auth renders on the server; awesome-go-auth and awesome-lambda-auth do not send it, so it is `null` there. When it is `null`, draw a QR code from `otpauthUrl` with a QR package of your choice, or show `secret` for manual entry. A setup response without a `secret` comes back as a failed `AuthResult`, not as an exception.
 
 ### SMS one-time password
 
