@@ -53,6 +53,10 @@ abstract class AuthClient {
   Future<AuthUser?> checkSession();
 
   /// Returns a list of all active sessions for the current user.
+  ///
+  /// Calls `GET $apiPrefix/sessions`. Returns an empty list when the server
+  /// answers anything but 200, and skips any entry that carries no
+  /// `sessionHandle`: see [SessionInfo.fromJson].
   Future<List<SessionInfo>> getActiveSessions();
 
   /// Revokes the session identified by [sessionHandle].

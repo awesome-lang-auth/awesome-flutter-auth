@@ -9,6 +9,7 @@ import 'package:awesome_flutter_auth/src/http/token_storage.dart';
 import 'package:awesome_flutter_auth/src/auth_events.dart';
 import 'package:awesome_flutter_auth/src/auth_options.dart';
 import 'package:awesome_flutter_auth/src/auth_user.dart';
+import 'package:awesome_flutter_auth/src/models/session_info.dart';
 import 'package:awesome_flutter_auth/src/platform/native_auth_client.dart';
 
 class MockHttpClient extends Mock implements http.Client {}
@@ -453,6 +454,101 @@ void main() {
       final body = jsonDecode(captured.first as String) as Map<String, dynamic>;
       expect(body['token'], equals('conflict-token'));
       expect(body['loginAfterLinking'], isTrue);
+    });
+  });
+
+  // Issue #21: the server sends `sessionHandle`, not `handle`.
+  group('AuthClient — active sessions', () {
+    final sessionsUri = Uri.parse('https://api.example.com/auth/sessions');
+
+    void stubSessions(String body) {
+      when(() => mockClient.get(sessionsUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response(body, 200,
+              headers: {'content-type': 'application/json'}));
+    }
+
+    test('getActiveSessions reads the sessionHandle the server sends',
+        () async {
+      // The shape GET /sessions answers with: the reference's SessionInfo
+      // (src/models/session.model.ts), dates serialised by JSON.stringify.
+      stubSessions(r'''
+{"sessions":[{"sessionHandle":"ses_ae852735043ae641f308b16b03b6a12d",
+"userId":"user-123","createdAt":"2026-08-15T18:00:00.000Z",
+"expiresAt":"2026-08-22T18:00:00.000Z",
+"lastActiveAt":"2026-08-15T18:29:31.000Z",
+"userAgent":"Mozilla/5.0","ipAddress":"203.0.113.7"}]}''');
+
+      final sessions = await authClient.getActiveSessions();
+
+      expect(sessions, hasLength(1));
+      final session = sessions.single;
+      expect(session.handle, equals('ses_ae852735043ae641f308b16b03b6a12d'));
+      expect(session.userAgent, equals('Mozilla/5.0'));
+      expect(session.ipAddress, equals('203.0.113.7'));
+      expect(session.createdAt, equals(DateTime.utc(2026, 8, 15, 18)));
+      expect(session.lastActiveAt, equals(DateTime.utc(2026, 8, 15, 18, 29, 31)));
+      expect(session.isCurrent, isFalse);
+    });
+
+    test('getActiveSessions falls back to handle', () async {
+      stubSessions('{"sessions":[{"handle":"legacy-handle"}]}');
+
+      final sessions = await authClient.getActiveSessions();
+
+      expect(sessions.single.handle, equals('legacy-handle'));
+    });
+
+    test('getActiveSessions skips an entry with no handle instead of throwing',
+        () async {
+      stubSessions('{"sessions":[{"userId":"user-123"},'
+          '{"sessionHandle":"ses_ok","createdAt":42,"isCurrent":"yes"}]}');
+
+      final sessions = await authClient.getActiveSessions();
+
+      expect(sessions, hasLength(1));
+      expect(sessions.single.handle, equals('ses_ok'));
+      expect(sessions.single.createdAt, isNull);
+      expect(sessions.single.isCurrent, isFalse);
+    });
+
+    test('revokeSession sends the handle read from sessionHandle', () async {
+      stubSessions(
+          '{"sessions":[{"sessionHandle":"ses_ae852735043ae641f308b16b03b6a12d"}]}');
+      final revokeUri = Uri.parse(
+          'https://api.example.com/auth/sessions/ses_ae852735043ae641f308b16b03b6a12d');
+      when(() => mockClient.delete(revokeUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(200, {'success': true}));
+
+      final sessions = await authClient.getActiveSessions();
+      final result = await authClient.revokeSession(sessions.single.handle);
+
+      expect(result.success, isTrue);
+      verify(() => mockClient.delete(revokeUri, headers: any(named: 'headers')))
+          .called(1);
+    });
+
+    test('SessionInfo.toJson writes sessionHandle and round-trips', () {
+      final session = SessionInfo(
+        handle: 'ses_1',
+        createdAt: DateTime.utc(2026, 8, 15, 18),
+        isCurrent: true,
+      );
+
+      final json = session.toJson();
+      final back = SessionInfo.fromJson(json);
+
+      expect(json['sessionHandle'], equals('ses_1'));
+      expect(json.containsKey('handle'), isFalse);
+      expect(back.handle, equals('ses_1'));
+      expect(back.createdAt, equals(DateTime.utc(2026, 8, 15, 18)));
+      expect(back.isCurrent, isTrue);
+    });
+
+    test('SessionInfo.fromJson throws FormatException without a handle', () {
+      expect(() => SessionInfo.fromJson({'userId': 'user-123'}),
+          throwsFormatException);
+      expect(() => SessionInfo.fromJson({'sessionHandle': 7}),
+          throwsFormatException);
     });
   });
 

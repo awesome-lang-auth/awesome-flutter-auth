@@ -143,10 +143,16 @@ abstract class BaseAuthClient implements AuthClient {
       final data = jsonDecode(response.body);
       final list = (data is Map<String, dynamic>) ? data['sessions'] : data;
       if (list is List) {
-        return list
-            .whereType<Map<String, dynamic>>()
-            .map(SessionInfo.fromJson)
-            .toList();
+        final sessions = <SessionInfo>[];
+        for (final entry in list.whereType<Map<String, dynamic>>()) {
+          try {
+            sessions.add(SessionInfo.fromJson(entry));
+          } on FormatException {
+            // No handle means nothing to show or revoke: skip the entry
+            // instead of failing the whole list.
+          }
+        }
+        return sessions;
       }
     }
     return [];

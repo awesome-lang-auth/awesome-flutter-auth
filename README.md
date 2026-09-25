@@ -480,7 +480,7 @@ if (cleanup.success) {
 
 | Field | Type | Description |
 |---|---|---|
-| `handle` | `String` | Unique session identifier — pass to `revokeSession()` |
+| `handle` | `String` | Unique session identifier, read from the server's `sessionHandle` — pass to `revokeSession()` |
 | `userAgent` | `String?` | User-agent string of the client |
 | `ipAddress` | `String?` | IP address of the client |
 | `createdAt` | `DateTime?` | When the session was created |
