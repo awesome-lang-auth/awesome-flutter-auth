@@ -300,14 +300,14 @@ final result = await auth.login('user@example.com', 'password');
 
 if (result.success && !result.requires2fa) {
   // Direct login — no 2FA needed
-} else if (result.requires2fa && !result.requires2FASetup) {
+} else if (result.requires2fa) {
   // User has 2FA enabled — verify with one of the available methods
   print('Available 2FA methods: ${result.availableMethods}');
   // Use result.tempToken for the chosen 2FA call
   await _handle2fa(result.tempToken!, result.availableMethods);
-} else if (result.requires2fa && result.requires2FASetup) {
-  // User is required to set up 2FA before continuing
-  await _setup2fa(result.tempToken!);
+} else {
+  // Wrong credentials, or a forced 2FA enrolment: see below
+  print('Login failed: ${result.error}');
 }
 ```
 
@@ -316,9 +316,24 @@ if (result.success && !result.requires2fa) {
 | Field | Type | Description |
 |---|---|---|
 | `requires2fa` | `bool` | `true` when a 2FA step is needed before authentication completes |
-| `requires2FASetup` | `bool` | `true` when the user must enrol in 2FA first |
+| `requires2FASetup` | `bool` | `true` only when a 200/201 login answer carries both `requiresTwoFactor: true` and `requires2FASetup: true`; see [Forced 2FA enrolment](#forced-2fa-enrolment) |
 | `tempToken` | `String?` | Temporary session token to pass to the 2FA verification calls |
 | `availableMethods` | `List<String>` | Methods the user can use (e.g. `['totp', 'sms', 'magic-link']`) |
+
+### Forced 2FA enrolment
+
+When 2FA is required for an account that has no second factor it can use, awesome-node-auth answers `POST /login` with a 403, and awesome-go-auth and awesome-lambda-auth send the same answer:
+
+```json
+{ "requires2FASetup": true, "tempToken": "…", "code": "2FA_SETUP_REQUIRED" }
+```
+
+`login()` does not surface this answer today. It reads `requiresTwoFactor` and `requires2FASetup` only from a 200 or 201, so on this 403 it returns a plain failure:
+
+- `success` is `false` and `error` is the generic `'Login failed'`;
+- `requires2FASetup` is `false`, `errorCode` is `null` and `tempToken` is `null`.
+
+The app cannot tell this case from a wrong password, and `requires2FASetup` is never `true` against these servers. Enrol a second factor while the account can still sign in (for example `setup2fa()` and `verify2faSetup()` from an authenticated session) before 2FA becomes mandatory for it.
 
 ---
 
@@ -666,7 +681,7 @@ if (result.success) {
 | Field | Type | Description |
 |---|---|---|
 | `requires2fa` | `bool` | `true` when a 2FA verification step is required |
-| `requires2FASetup` | `bool` | `true` when the user must set up 2FA before continuing |
+| `requires2FASetup` | `bool` | `true` only when a 200/201 login answer asks for 2FA enrolment; see [Forced 2FA enrolment](#forced-2fa-enrolment) |
 | `tempToken` | `String?` | Temporary token for the 2FA verification calls |
 | `availableMethods` | `List<String>` | 2FA methods available to this user |
 

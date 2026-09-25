@@ -42,6 +42,13 @@ class LoginResult extends AuthResult<AuthUser> {
   final bool requires2fa;
 
   /// Whether the user needs to set up 2FA before proceeding.
+  ///
+  /// Set only from a 200/201 login answer that carries both
+  /// `requiresTwoFactor: true` and `requires2FASetup: true`. The
+  /// awesome-lang-auth servers answer a forced enrolment with
+  /// `403 {"requires2FASetup": true, "code": "2FA_SETUP_REQUIRED"}` instead,
+  /// which `AuthClient.login()` returns as a plain failure with this flag
+  /// `false`.
   final bool requires2FASetup;
 
   /// Temporary token used to complete the 2FA flow.

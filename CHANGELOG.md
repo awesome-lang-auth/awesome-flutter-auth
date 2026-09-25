@@ -20,6 +20,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - `TotpSetupData.otpauthUrl`: the `otpauth://` provisioning URI that awesome-node-auth, awesome-go-auth and awesome-lambda-auth send, so an app can draw the QR code itself.
 
+### Documentation
+
+- README, "Forced 2FA enrolment": says what `login()` does today when the servers answer `403 {"requires2FASetup": true, "code": "2FA_SETUP_REQUIRED"}`. It returns a plain failure with `requires2FASetup == false`, `errorCode == null` and no `tempToken`, so enrol a second factor before 2FA becomes mandatory for the account.
+
 ### Migration
 
 - `TotpSetupData.qrCode` is now `String?` (it was `String`). Code that passes it where a `String` is expected, such as `Image.network(setup.data!.qrCode)`, needs a null check, with `otpauthUrl` as the fallback.
