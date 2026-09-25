@@ -4,12 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 
-import 'package:awesome_node_auth_flutter/src/http/auth_http_client.dart';
-import 'package:awesome_node_auth_flutter/src/http/token_storage.dart';
-import 'package:awesome_node_auth_flutter/src/auth_events.dart';
-import 'package:awesome_node_auth_flutter/src/auth_options.dart';
-import 'package:awesome_node_auth_flutter/src/auth_user.dart';
-import 'package:awesome_node_auth_flutter/src/platform/native_auth_client.dart';
+import 'package:awesome_flutter_auth/src/http/auth_http_client.dart';
+import 'package:awesome_flutter_auth/src/http/token_storage.dart';
+import 'package:awesome_flutter_auth/src/auth_events.dart';
+import 'package:awesome_flutter_auth/src/auth_options.dart';
+import 'package:awesome_flutter_auth/src/auth_user.dart';
+import 'package:awesome_flutter_auth/src/platform/native_auth_client.dart';
 
 class MockHttpClient extends Mock implements http.Client {}
 

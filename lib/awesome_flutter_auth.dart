@@ -1,4 +1,7 @@
-/// Flutter/Dart authentication client for the awesome-node-auth backend.
+/// Flutter/Dart authentication client for awesome-lang-auth servers
+/// (awesome-node-auth and the ports that speak its wire contract).
+///
+/// Formerly published as `awesome_node_auth_flutter`.
 ///
 /// Supports:
 /// - Web (including WASM): cookie-based auth with CSRF protection

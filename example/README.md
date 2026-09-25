@@ -1,8 +1,8 @@
 # Awesome Node Auth - Flutter Integration Example
 
-This example demonstrates a complete authentication flow using the Flutter `awesome_node_auth_flutter` client library with a Node.js backend powered by `awesome-node-auth`.
+This example demonstrates a complete authentication flow using the Flutter `awesome_flutter_auth` client library with a Node.js backend powered by `awesome-node-auth`.
 
-The Flutter app in this folder uses a local path dependency (`path: ../`) so it always runs against the current workspace version of `awesome_node_auth_flutter`, not the published pub.dev version.
+The Flutter app in this folder uses a local path dependency (`path: ../`) so it always runs against the current workspace version of `awesome_flutter_auth`, not the published pub.dev version.
 
 ## 📱 Architecture
 
@@ -268,10 +268,10 @@ To use MongoDB or another database, implement the `IUserStore` interface from `a
 
 ## 📚 Learn More
 
-- **Flutter Client:** [awesome_node_auth_flutter on pub.dev](https://pub.dev/packages/awesome_node_auth_flutter)
+- **Flutter Client:** [awesome_flutter_auth on pub.dev](https://pub.dev/packages/awesome_flutter_auth)
 - **Node.js Server:** [awesome-node-auth on npm](https://www.npmjs.com/package/awesome-node-auth)
 - **Flutter Docs:** [flutter.dev](https://flutter.dev/docs)
-- **awesome-node-auth Docs:** [github.com/nik2208/awesome-node-auth](https://github.com/nik2208/awesome-node-auth)
+- **awesome-node-auth Docs:** [github.com/awesome-lang-auth/awesome-node-auth](https://github.com/awesome-lang-auth/awesome-node-auth)
 
 ## 🐛 Troubleshooting
 
@@ -312,4 +312,4 @@ app.use(cors({
 
 ## 📄 License
 
-This example is part of [awesome-node-auth-flutter](https://github.com/nik2208/awesome-node-auth-flutter) and is licensed under the MIT License.
+This example is part of [awesome-flutter-auth](https://github.com/awesome-lang-auth/awesome-flutter-auth) and is licensed under the MIT License.

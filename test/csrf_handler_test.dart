@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:awesome_node_auth_flutter/src/http/csrf_cookie_parser.dart';
-import 'package:awesome_node_auth_flutter/src/http/csrf_handler_stub.dart';
+import 'package:awesome_flutter_auth/src/http/csrf_cookie_parser.dart';
+import 'package:awesome_flutter_auth/src/http/csrf_handler_stub.dart';
 
 void main() {
   group('parseCsrfFromCookies', () {

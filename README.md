@@ -1,10 +1,10 @@
-# awesome_node_auth_flutter
+# awesome_flutter_auth
 
-[![pub.dev](https://img.shields.io/pub/v/awesome_node_auth_flutter.svg)](https://pub.dev/packages/awesome_node_auth_flutter)
+[![pub.dev](https://img.shields.io/pub/v/awesome_flutter_auth.svg)](https://pub.dev/packages/awesome_flutter_auth)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![WASM ready](https://img.shields.io/badge/WASM-ready-green.svg)]()
 
-Flutter/Dart authentication client for [awesome-node-auth](https://github.com/nik2208/awesome-node-auth) backends.
+Flutter/Dart authentication client for [awesome-lang-auth](https://github.com/awesome-lang-auth) servers: [awesome-node-auth](https://github.com/awesome-lang-auth/awesome-node-auth) and the ports that speak its wire contract, such as [awesome-go-auth](https://github.com/awesome-lang-auth/awesome-go-auth) and [awesome-lambda-auth](https://github.com/awesome-lang-auth/awesome-lambda-auth).
 
 Supports **web** (including WASM) via HttpOnly cookies + CSRF, and **native** (iOS, Android, Desktop) via Bearer token.
 
@@ -42,17 +42,25 @@ Supports **web** (including WASM) via HttpOnly cookies + CSRF, and **native** (i
 
 ## Installation
 
+```bash
+flutter pub add awesome_flutter_auth
+```
+
+or add it to `pubspec.yaml` yourself:
+
 ```yaml
 dependencies:
-  awesome_node_auth_flutter: ^1.10.0
+  awesome_flutter_auth: ^1.10.1
 ```
+
+> **Formerly `awesome_node_auth_flutter`:** replace the dependency and the `package:` imports: `package:awesome_node_auth_flutter/awesome_node_auth_flutter.dart` becomes `package:awesome_flutter_auth/awesome_flutter_auth.dart`. The [CHANGELOG](CHANGELOG.md) lists the other 1.10.1 changes.
 
 ---
 
 ## Quick start
 
 ```dart
-import 'package:awesome_node_auth_flutter/awesome_node_auth_flutter.dart';
+import 'package:awesome_flutter_auth/awesome_flutter_auth.dart';
 
 // 1. Create the client (checkSession is called automatically)
 final auth = AuthClient(AuthOptions(apiPrefix: '/api/auth'));
@@ -673,7 +681,7 @@ dependencies:
 
 ```dart
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:awesome_node_auth_flutter/awesome_node_auth_flutter.dart';
+import 'package:awesome_flutter_auth/awesome_flutter_auth.dart';
 
 class SecureTokenStorage implements TokenStorage {
   final _storage = const FlutterSecureStorage();
