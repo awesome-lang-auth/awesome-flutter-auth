@@ -140,13 +140,25 @@ abstract class BaseAuthClient implements AuthClient {
   Future<List<SessionInfo>> getActiveSessions() async {
     final response = await httpClient.apiGet('/sessions');
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final Object? data;
+      try {
+        data = jsonDecode(response.body);
+      } on FormatException {
+        // An HTML fallback page or an empty body: nothing to list.
+        return [];
+      }
       final list = (data is Map<String, dynamic>) ? data['sessions'] : data;
       if (list is List) {
-        return list
-            .whereType<Map<String, dynamic>>()
-            .map(SessionInfo.fromJson)
-            .toList();
+        final sessions = <SessionInfo>[];
+        for (final entry in list.whereType<Map<String, dynamic>>()) {
+          try {
+            sessions.add(SessionInfo.fromJson(entry));
+          } on FormatException {
+            // No handle means nothing to show or revoke: skip the entry
+            // instead of failing the whole list.
+          }
+        }
+        return sessions;
       }
     }
     return [];
@@ -403,7 +415,14 @@ abstract class BaseAuthClient implements AuthClient {
     final response = await httpClient.apiPost('/2fa/setup');
     if (response.statusCode >= 200 && response.statusCode < 300) {
       final data = _parseBody(response);
-      if (data != null) return AuthResult.success(TotpSetupData.fromJson(data));
+      if (data != null) {
+        try {
+          return AuthResult.success(TotpSetupData.fromJson(data));
+        } on FormatException catch (e) {
+          return AuthResult.failure(
+              'Unexpected 2FA setup response: ${e.message}');
+        }
+      }
     }
     return AuthResult.failure(_errorMessage(response));
   }

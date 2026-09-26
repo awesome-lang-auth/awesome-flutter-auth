@@ -42,6 +42,13 @@ class LoginResult extends AuthResult<AuthUser> {
   final bool requires2fa;
 
   /// Whether the user needs to set up 2FA before proceeding.
+  ///
+  /// Set only from a 200/201 login answer that carries both
+  /// `requiresTwoFactor: true` and `requires2FASetup: true`. The
+  /// awesome-lang-auth servers answer a forced enrolment with
+  /// `403 {"requires2FASetup": true, "code": "2FA_SETUP_REQUIRED"}` instead,
+  /// which `AuthClient.login()` returns as a plain failure with this flag
+  /// `false`.
   final bool requires2FASetup;
 
   /// Temporary token used to complete the 2FA flow.
@@ -85,16 +92,40 @@ class LoginResult extends AuthResult<AuthUser> {
 
 /// Data returned when setting up TOTP two-factor authentication.
 class TotpSetupData {
-  /// The TOTP secret key.
+  /// The TOTP secret key, for manual entry in an authenticator app.
   final String secret;
 
-  /// A data URL for the QR code image.
-  final String qrCode;
+  /// The `otpauth://totp/...` provisioning URI.
+  ///
+  /// Render your own QR code from it when [qrCode] is `null`. The
+  /// awesome-lang-auth servers send it; it is `null` only when a server
+  /// leaves it out.
+  final String? otpauthUrl;
 
-  const TotpSetupData({required this.secret, required this.qrCode});
+  /// A PNG data URL of the QR code, when the server renders one.
+  ///
+  /// awesome-node-auth sends it; awesome-go-auth and awesome-lambda-auth do
+  /// not, so fall back to [otpauthUrl] or [secret].
+  final String? qrCode;
 
-  factory TotpSetupData.fromJson(Map<String, dynamic> json) => TotpSetupData(
-        secret: json['secret'] as String,
-        qrCode: json['qrCode'] as String,
-      );
+  const TotpSetupData({required this.secret, this.otpauthUrl, this.qrCode});
+
+  /// Builds a [TotpSetupData] from the `POST /2fa/setup` response.
+  ///
+  /// Throws a [FormatException] when `secret` is missing or not a string;
+  /// `otpauthUrl` and `qrCode` are `null` when missing or not strings.
+  factory TotpSetupData.fromJson(Map<String, dynamic> json) {
+    final secret = json['secret'];
+    if (secret is! String) {
+      throw const FormatException(
+          'TotpSetupData: the response has no "secret" string');
+    }
+    final otpauthUrl = json['otpauthUrl'];
+    final qrCode = json['qrCode'];
+    return TotpSetupData(
+      secret: secret,
+      otpauthUrl: otpauthUrl is String ? otpauthUrl : null,
+      qrCode: qrCode is String ? qrCode : null,
+    );
+  }
 }

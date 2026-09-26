@@ -4,12 +4,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 
-import 'package:awesome_node_auth_flutter/src/http/auth_http_client.dart';
-import 'package:awesome_node_auth_flutter/src/http/token_storage.dart';
-import 'package:awesome_node_auth_flutter/src/auth_events.dart';
-import 'package:awesome_node_auth_flutter/src/auth_options.dart';
-import 'package:awesome_node_auth_flutter/src/auth_user.dart';
-import 'package:awesome_node_auth_flutter/src/platform/native_auth_client.dart';
+import 'package:awesome_flutter_auth/src/http/auth_http_client.dart';
+import 'package:awesome_flutter_auth/src/http/token_storage.dart';
+import 'package:awesome_flutter_auth/src/auth_events.dart';
+import 'package:awesome_flutter_auth/src/auth_options.dart';
+import 'package:awesome_flutter_auth/src/auth_user.dart';
+import 'package:awesome_flutter_auth/src/models/auth_result.dart';
+import 'package:awesome_flutter_auth/src/models/session_info.dart';
+import 'package:awesome_flutter_auth/src/platform/native_auth_client.dart';
 
 class MockHttpClient extends Mock implements http.Client {}
 
@@ -232,20 +234,77 @@ void main() {
   });
 
   group('AuthClient — 2FA TOTP', () {
-    test('setup2fa returns TotpSetupData', () async {
+    final setupUri = Uri.parse('https://api.example.com/auth/2fa/setup');
+    const otpauthUrl =
+        'otpauth://totp/awesome-node-auth:test%40example.com?secret=TOTP_SECRET&issuer=awesome-node-auth';
+
+    void stubSetup(int status, Map<String, dynamic> body) {
       when(() => mockClient.post(
-            Uri.parse('https://api.example.com/auth/2fa/setup'),
+            setupUri,
             headers: any(named: 'headers'),
             body: any(named: 'body'),
-          )).thenAnswer((_) async => jsonResponse(200, {
-            'secret': 'TOTP_SECRET',
-            'qrCode': 'data:image/png;base64,abc==',
-          }));
+          )).thenAnswer((_) async => jsonResponse(status, body));
+    }
+
+    test('setup2fa returns secret, otpauthUrl and qrCode (node shape)',
+        () async {
+      stubSetup(200, {
+        'secret': 'TOTP_SECRET',
+        'otpauthUrl': otpauthUrl,
+        'qrCode': 'data:image/png;base64,abc==',
+      });
 
       final result = await authClient.setup2fa();
 
       expect(result.success, isTrue);
       expect(result.data?.secret, equals('TOTP_SECRET'));
+      expect(result.data?.otpauthUrl, equals(otpauthUrl));
+      expect(result.data?.qrCode, equals('data:image/png;base64,abc=='));
+    });
+
+    // Issue #22: awesome-go-auth and awesome-lambda-auth send no qrCode.
+    test('setup2fa succeeds without qrCode and exposes otpauthUrl', () async {
+      stubSetup(200, {'secret': 'TOTP_SECRET', 'otpauthUrl': otpauthUrl});
+
+      final result = await authClient.setup2fa();
+
+      expect(result.success, isTrue);
+      expect(result.data?.secret, equals('TOTP_SECRET'));
+      expect(result.data?.otpauthUrl, equals(otpauthUrl));
+      expect(result.data?.qrCode, isNull);
+      verify(() => mockClient.post(
+            setupUri,
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).called(1);
+    });
+
+    test('setup2fa turns a response without secret into a failure', () async {
+      stubSetup(200, {'otpauthUrl': otpauthUrl});
+
+      final result = await authClient.setup2fa();
+
+      expect(result.success, isFalse);
+      expect(result.data, isNull);
+      expect(result.error, contains('secret'));
+    });
+
+    test('setup2fa turns fields of the wrong type into a failure', () async {
+      stubSetup(200, {'secret': 42, 'otpauthUrl': otpauthUrl});
+
+      final result = await authClient.setup2fa();
+
+      expect(result.success, isFalse);
+      expect(result.error, contains('secret'));
+    });
+
+    test('TotpSetupData.fromJson ignores optional fields of the wrong type', () {
+      final data = TotpSetupData.fromJson(
+          {'secret': 'TOTP_SECRET', 'otpauthUrl': 1, 'qrCode': false});
+
+      expect(data.secret, equals('TOTP_SECRET'));
+      expect(data.otpauthUrl, isNull);
+      expect(data.qrCode, isNull);
     });
   });
 
@@ -453,6 +512,111 @@ void main() {
       final body = jsonDecode(captured.first as String) as Map<String, dynamic>;
       expect(body['token'], equals('conflict-token'));
       expect(body['loginAfterLinking'], isTrue);
+    });
+  });
+
+  // Issue #21: the server sends `sessionHandle`, not `handle`.
+  group('AuthClient — active sessions', () {
+    final sessionsUri = Uri.parse('https://api.example.com/auth/sessions');
+
+    void stubSessions(String body) {
+      when(() => mockClient.get(sessionsUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => http.Response(body, 200,
+              headers: {'content-type': 'application/json'}));
+    }
+
+    test('getActiveSessions reads the sessionHandle the server sends',
+        () async {
+      // The shape GET /sessions answers with: the reference's SessionInfo
+      // (src/models/session.model.ts), dates serialised by JSON.stringify.
+      stubSessions(r'''
+{"sessions":[{"sessionHandle":"ses_ae852735043ae641f308b16b03b6a12d",
+"userId":"user-123","createdAt":"2026-08-15T18:00:00.000Z",
+"expiresAt":"2026-08-22T18:00:00.000Z",
+"lastActiveAt":"2026-08-15T18:29:31.000Z",
+"userAgent":"Mozilla/5.0","ipAddress":"203.0.113.7"}]}''');
+
+      final sessions = await authClient.getActiveSessions();
+
+      expect(sessions, hasLength(1));
+      final session = sessions.single;
+      expect(session.handle, equals('ses_ae852735043ae641f308b16b03b6a12d'));
+      expect(session.userAgent, equals('Mozilla/5.0'));
+      expect(session.ipAddress, equals('203.0.113.7'));
+      expect(session.createdAt, equals(DateTime.utc(2026, 8, 15, 18)));
+      expect(session.lastActiveAt, equals(DateTime.utc(2026, 8, 15, 18, 29, 31)));
+      expect(session.isCurrent, isFalse);
+    });
+
+    test('getActiveSessions falls back to handle', () async {
+      stubSessions('{"sessions":[{"handle":"legacy-handle"}]}');
+
+      final sessions = await authClient.getActiveSessions();
+
+      expect(sessions.single.handle, equals('legacy-handle'));
+    });
+
+    test('getActiveSessions skips an entry with no handle instead of throwing',
+        () async {
+      stubSessions('{"sessions":[{"userId":"user-123"},'
+          '{"sessionHandle":"ses_ok","createdAt":42,"isCurrent":"yes"}]}');
+
+      final sessions = await authClient.getActiveSessions();
+
+      expect(sessions, hasLength(1));
+      expect(sessions.single.handle, equals('ses_ok'));
+      expect(sessions.single.createdAt, isNull);
+      expect(sessions.single.isCurrent, isFalse);
+    });
+
+    test('getActiveSessions returns an empty list for a body that is not JSON',
+        () async {
+      // What a proxy or SPA fallback answers when apiPrefix is wrong.
+      stubSessions('<html><body>app</body></html>');
+      expect(await authClient.getActiveSessions(), isEmpty);
+
+      stubSessions('');
+      expect(await authClient.getActiveSessions(), isEmpty);
+    });
+
+    test('revokeSession sends the handle read from sessionHandle', () async {
+      stubSessions(
+          '{"sessions":[{"sessionHandle":"ses_ae852735043ae641f308b16b03b6a12d"}]}');
+      final revokeUri = Uri.parse(
+          'https://api.example.com/auth/sessions/ses_ae852735043ae641f308b16b03b6a12d');
+      when(() => mockClient.delete(revokeUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(200, {'success': true}));
+
+      final sessions = await authClient.getActiveSessions();
+      final result = await authClient.revokeSession(sessions.single.handle);
+
+      expect(result.success, isTrue);
+      verify(() => mockClient.delete(revokeUri, headers: any(named: 'headers')))
+          .called(1);
+    });
+
+    test('SessionInfo.toJson writes sessionHandle and round-trips', () {
+      final session = SessionInfo(
+        handle: 'ses_1',
+        createdAt: DateTime.utc(2026, 8, 15, 18),
+        isCurrent: true,
+      );
+
+      final json = session.toJson();
+      final back = SessionInfo.fromJson(json);
+
+      expect(json['sessionHandle'], equals('ses_1'));
+      expect(json.containsKey('handle'), isFalse);
+      expect(back.handle, equals('ses_1'));
+      expect(back.createdAt, equals(DateTime.utc(2026, 8, 15, 18)));
+      expect(back.isCurrent, isTrue);
+    });
+
+    test('SessionInfo.fromJson throws FormatException without a handle', () {
+      expect(() => SessionInfo.fromJson({'userId': 'user-123'}),
+          throwsFormatException);
+      expect(() => SessionInfo.fromJson({'sessionHandle': 7}),
+          throwsFormatException);
     });
   });
 

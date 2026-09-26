@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  awesome_node_auth_flutter:
+  awesome_flutter_auth:
     path: ../
 
 dev_dependencies:

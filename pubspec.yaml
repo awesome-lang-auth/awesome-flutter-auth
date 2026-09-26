@@ -1,13 +1,13 @@
-name: awesome_node_auth_flutter
+name: awesome_flutter_auth
 description: >-
-  A Flutter/Dart authentication client for the awesome-node-auth backend.
+  A Flutter/Dart authentication client for awesome-lang-auth servers.
   Supports web (including WASM) via cookie + CSRF and native platforms via
   Bearer token.
-version: 1.10.0
-homepage: https://github.com/nik2208/awesome-node-auth-flutter
-repository: https://github.com/nik2208/awesome-node-auth-flutter
-issue_tracker: https://github.com/nik2208/awesome-node-auth-flutter/issues
-documentation: https://pub.dev/documentation/awesome_node_auth_flutter/latest/
+version: 1.10.1
+homepage: https://github.com/awesome-lang-auth/awesome-flutter-auth
+repository: https://github.com/awesome-lang-auth/awesome-flutter-auth
+issue_tracker: https://github.com/awesome-lang-auth/awesome-flutter-auth/issues
+documentation: https://pub.dev/documentation/awesome_flutter_auth/latest/
 
 topics:
   - authentication
