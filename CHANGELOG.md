@@ -13,7 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- `getActiveSessions()` no longer throws against a conforming server ([#21](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/21)). `SessionInfo.fromJson` reads `sessionHandle`, the key the servers send, with a fallback to `handle`; optional fields of an unexpected type become `null` instead of throwing, and an entry with no handle is skipped. `SessionInfo.toJson()` now writes `sessionHandle`. The `GET /sessions` and `DELETE /sessions/<handle>` requests are unchanged.
+- `getActiveSessions()` no longer throws against a conforming server ([#21](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/21)). `SessionInfo.fromJson` reads `sessionHandle`, the key the servers send, with a fallback to `handle`; optional fields of an unexpected type become `null` instead of throwing, an entry with no handle is skipped, and a 200 whose body is not JSON (an HTML fallback page, an empty body) gives an empty list, as `getLinkedAccounts()` already does. `SessionInfo.toJson()` now writes `sessionHandle`. The `GET /sessions` and `DELETE /sessions/<handle>` requests are unchanged.
 - `setup2fa()` no longer throws when the server sends no `qrCode`, as awesome-go-auth and awesome-lambda-auth do ([#22](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/22)). A response without a `secret` string now comes back as `AuthResult.failure` instead of an exception. The `POST /2fa/setup` request is unchanged.
 
 ### Added

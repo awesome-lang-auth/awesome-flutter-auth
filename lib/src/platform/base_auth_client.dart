@@ -140,7 +140,13 @@ abstract class BaseAuthClient implements AuthClient {
   Future<List<SessionInfo>> getActiveSessions() async {
     final response = await httpClient.apiGet('/sessions');
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
+      final Object? data;
+      try {
+        data = jsonDecode(response.body);
+      } on FormatException {
+        // An HTML fallback page or an empty body: nothing to list.
+        return [];
+      }
       final list = (data is Map<String, dynamic>) ? data['sessions'] : data;
       if (list is List) {
         final sessions = <SessionInfo>[];

@@ -569,6 +569,16 @@ void main() {
       expect(sessions.single.isCurrent, isFalse);
     });
 
+    test('getActiveSessions returns an empty list for a body that is not JSON',
+        () async {
+      // What a proxy or SPA fallback answers when apiPrefix is wrong.
+      stubSessions('<html><body>app</body></html>');
+      expect(await authClient.getActiveSessions(), isEmpty);
+
+      stubSessions('');
+      expect(await authClient.getActiveSessions(), isEmpty);
+    });
+
     test('revokeSession sends the handle read from sessionHandle', () async {
       stubSessions(
           '{"sessions":[{"sessionHandle":"ses_ae852735043ae641f308b16b03b6a12d"}]}');
