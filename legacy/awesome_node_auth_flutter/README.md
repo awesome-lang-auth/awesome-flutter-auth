@@ -29,15 +29,17 @@
    import 'package:awesome_flutter_auth/awesome_flutter_auth.dart';
    ```
 
-   The class names and the API are the same.
+   The class names are the same; the two changes below are the only ones that can need code changes.
 
 3. `TotpSetupData.qrCode` is now `String?` (it was `String`), because awesome-go-auth and awesome-lambda-auth do not send it. Add a null check and fall back to `TotpSetupData.otpauthUrl` (draw the QR code yourself) or `secret`.
+
+4. `SessionInfo.toJson()` now writes the handle under `sessionHandle` (it was `handle`). `SessionInfo.fromJson` still reads either key.
 
 ## Why 2.0.0
 
 `awesome_flutter_auth` 1.10.1 changed `TotpSetupData.qrCode` from `String` to `String?`, which can break code that compiled against `awesome_node_auth_flutter` 1.10.0. A re-export of 1.10.1 under the old name is therefore a major release. A `^1.x` constraint keeps resolving to 1.10.0, the last standalone release, so nobody is moved onto the new package by a routine `pub upgrade`.
 
-If you bump to `awesome_node_auth_flutter: ^2.0.0` instead of migrating, your existing imports keep compiling (apart from the `qrCode` change above) and you get `awesome_flutter_auth` 1.x through this package. Migrating is still recommended: this package will not get further releases.
+If you bump to `awesome_node_auth_flutter: ^2.0.0` instead of migrating, your existing imports keep compiling (apart from the `qrCode` and `toJson()` changes above) and you get `awesome_flutter_auth` 1.x through this package. Migrating is still recommended: this package will not get further releases.
 
 ## Links
 

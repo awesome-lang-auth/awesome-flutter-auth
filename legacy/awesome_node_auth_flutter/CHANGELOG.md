@@ -9,10 +9,11 @@
 ### Breaking
 
 - Through `awesome_flutter_auth` 1.10.1, `TotpSetupData.qrCode` is now `String?` (it was `String`). Code that passes it where a `String` is expected, such as `Image.network(setup.data!.qrCode)`, needs a null check, with `TotpSetupData.otpauthUrl` as the fallback. This is why the bridge is a major release: a `^1.x` constraint stays on 1.10.0.
+- `SessionInfo.toJson()` writes the handle under `sessionHandle` (it was `handle`); `SessionInfo.fromJson` still reads either.
 
 ### Changed
 
-- Everything else `awesome_flutter_auth` 1.10.1 brings: `getActiveSessions()` reads `sessionHandle` ([#21](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/21)), `setup2fa()` accepts a response without `qrCode` ([#22](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/22)), the new `TotpSetupData.otpauthUrl`, and `SessionInfo.toJson()` writing `sessionHandle`. See the [awesome_flutter_auth changelog](https://github.com/awesome-lang-auth/awesome-flutter-auth/blob/main/CHANGELOG.md#1101).
+- Everything else `awesome_flutter_auth` 1.10.1 brings: `getActiveSessions()` reads `sessionHandle` ([#21](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/21)), `setup2fa()` accepts a response without `qrCode` ([#22](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/22)), and the new `TotpSetupData.otpauthUrl`. See the [awesome_flutter_auth changelog](https://github.com/awesome-lang-auth/awesome-flutter-auth/blob/main/CHANGELOG.md#1101).
 - `homepage`, `repository` and `issue_tracker` point at <https://github.com/awesome-lang-auth/awesome-flutter-auth>.
 
 ## 1.10.0 and earlier

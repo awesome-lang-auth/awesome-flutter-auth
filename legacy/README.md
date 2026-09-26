@@ -24,7 +24,10 @@ There is no workflow and no tag for it: do not push a `v2.0.0` tag, because
    awesome_flutter_auth".
 2. Export the folder to a directory outside any git checkout. Run inside this
    repository, pub applies `legacy/.pubignore` and reports "The pubspec is
-   hidden". For example, from a clone at the commit to publish:
+   hidden". Use the `dart` of a Flutter SDK (or `flutter pub publish`), for
+   example inside `ghcr.io/cirruslabs/flutter:stable`; a standalone Dart SDK
+   refuses the package. Run the commands below from a clone of `main` after
+   this folder has been merged there:
 
    ```sh
    out="$(mktemp -d)"
