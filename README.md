@@ -53,7 +53,7 @@ dependencies:
   awesome_flutter_auth: ^1.10.1
 ```
 
-> **Formerly `awesome_node_auth_flutter`:** replace the dependency and the `package:` imports: `package:awesome_node_auth_flutter/awesome_node_auth_flutter.dart` becomes `package:awesome_flutter_auth/awesome_flutter_auth.dart`. The [CHANGELOG](CHANGELOG.md) lists the other 1.10.1 changes.
+> **Formerly `awesome_node_auth_flutter`:** replace the dependency and the `package:` imports: `package:awesome_node_auth_flutter/awesome_node_auth_flutter.dart` becomes `package:awesome_flutter_auth/awesome_flutter_auth.dart`. `TotpSetupData.qrCode` is now `String?` (awesome-go-auth and awesome-lambda-auth do not send it); fall back to `otpauthUrl`. The [CHANGELOG](CHANGELOG.md) lists the other 1.10.1 changes.
 
 ---
 
@@ -499,11 +499,11 @@ if (cleanup.success) {
 | Field | Type | Description |
 |---|---|---|
 | `handle` | `String` | Unique session identifier, read from the server's `sessionHandle` — pass to `revokeSession()` |
-| `userAgent` | `String?` | User-agent string of the client |
-| `ipAddress` | `String?` | IP address of the client |
+| `userAgent` | `String?` | User-agent string of the client (not sent by awesome-go-auth / awesome-lambda-auth) |
+| `ipAddress` | `String?` | IP address of the client (not sent by awesome-go-auth / awesome-lambda-auth) |
 | `createdAt` | `DateTime?` | When the session was created |
-| `lastActiveAt` | `DateTime?` | Timestamp of the last activity |
-| `isCurrent` | `bool` | `true` for the session that belongs to the current request |
+| `lastActiveAt` | `DateTime?` | Timestamp of the last activity (not sent by awesome-go-auth / awesome-lambda-auth) |
+| `isCurrent` | `bool` | `true` only when the server marks the session; awesome-node-auth, awesome-go-auth and awesome-lambda-auth do not send it, so it is `false` against them |
 
 ---
 

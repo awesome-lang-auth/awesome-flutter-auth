@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Renamed to `awesome_flutter_auth`** (formerly `awesome_node_auth_flutter`, whose last version is 1.10.0). To migrate, replace the dependency in `pubspec.yaml` and the `package:` imports: `package:awesome_node_auth_flutter/awesome_node_auth_flutter.dart` becomes `package:awesome_flutter_auth/awesome_flutter_auth.dart`. The library file is now `lib/awesome_flutter_auth.dart`; the rename changes no behaviour.
+- **Renamed to `awesome_flutter_auth`** (formerly `awesome_node_auth_flutter`, whose last standalone release is 1.10.0). To migrate, replace the dependency in `pubspec.yaml` and the `package:` imports: `package:awesome_node_auth_flutter/awesome_node_auth_flutter.dart` becomes `package:awesome_flutter_auth/awesome_flutter_auth.dart`. The library file is now `lib/awesome_flutter_auth.dart`; the rename changes no behaviour.
 - The repository moved to the `awesome-lang-auth` organisation: <https://github.com/awesome-lang-auth/awesome-flutter-auth>. `homepage`, `repository`, `issue_tracker` and `documentation` in `pubspec.yaml` follow it.
 
 ### Fixed
@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Migration
 
 - `TotpSetupData.qrCode` is now `String?` (it was `String`). Code that passes it where a `String` is expected, such as `Image.network(setup.data!.qrCode)`, needs a null check, with `otpauthUrl` as the fallback.
+- `SessionInfo.toJson()` writes the handle under `sessionHandle` (it was `handle`); `SessionInfo.fromJson` still reads either.
 
 ## 1.10.0
 

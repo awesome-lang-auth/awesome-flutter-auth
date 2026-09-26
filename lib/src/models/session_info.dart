@@ -17,7 +17,10 @@ class SessionInfo {
   /// Timestamp of the last activity for this session.
   final DateTime? lastActiveAt;
 
-  /// Whether this is the currently active session for the authenticated user.
+  /// `true` only when the server marks the session with `isCurrent: true`.
+  ///
+  /// awesome-node-auth, awesome-go-auth and awesome-lambda-auth do not send
+  /// it, so it is `false` against them.
   final bool isCurrent;
 
   const SessionInfo({
