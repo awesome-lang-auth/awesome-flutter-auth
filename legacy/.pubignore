@@ -1,0 +1,7 @@
+# Nothing under legacy/ belongs in the awesome_flutter_auth archive that
+# `dart pub publish` (and publish.yml) builds from the repository root.
+#
+# Pub also applies this file when it runs inside a package below legacy/, which
+# hides that package's own files. Publish a legacy package from a copy outside
+# this git checkout instead: see legacy/README.md.
+*
