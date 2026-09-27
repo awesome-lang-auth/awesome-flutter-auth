@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.10.2
+
+### Added
+
+- **Offline token verification (`package:awesome_flutter_auth/offline_tokens.dart`)** ([#25](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/25)):
+  - Offline verification for JWS compact tokens signed with `alg: EdDSA` (Ed25519, RFC 8037 / RFC 8725) against pre-provisioned JWK OKP public keys.
+  - Implemented in pure Dart: runs in Flutter (mobile, desktop, web including WASM) as well as standalone Dart applications without Flutter SDK dependencies.
+  - Evaluates 10 sequential security checks: malformed structure, algorithm allow-list (`EdDSA` only, rejecting `none`, `HS256`, `Ed25519`), expected `typ`, rejection of `crit` headers, `kid` lookup in key set, canonical Ed25519 signature verification (`S < L`, high bit clear), claim type validation, `aud` check, `iss` check, and expiration check (`exp <= now`) with an injectable clock.
+  - Typed failure reasons with `OfflineTokenReason` and `OfflineTokenException` (no `Error` leaks for arbitrary input).
+  - Supports JWK OKP key sets via `OkpKeySet.fromJwks()` and SubjectPublicKeyInfo (SPKI) PEM keys via `OkpKey.fromPem()`.
+  - Re-exported from root `package:awesome_flutter_auth/awesome_flutter_auth.dart`.
+
+### Changed
+
+- Dropped the `environment.flutter` constraint in `pubspec.yaml`, enabling the package to be resolved and tested in pure Dart environments (`dart pub get` + `dart test`).
+
 ## 1.10.1
 
 ### Changed
