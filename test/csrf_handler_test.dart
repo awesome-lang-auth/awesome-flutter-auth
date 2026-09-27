@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+import 'package:test/test.dart';
 
 import 'package:awesome_flutter_auth/src/http/csrf_cookie_parser.dart';
 import 'package:awesome_flutter_auth/src/http/csrf_handler_stub.dart';

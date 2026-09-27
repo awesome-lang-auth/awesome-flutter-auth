@@ -36,7 +36,8 @@ Supports **web** (including WASM) via HttpOnly cookies + CSRF, and **native** (i
 22. [SSE stream](#sse-stream)
 23. [UI config](#ui-config)
 24. [WASM compatibility](#wasm-compatibility)
-25. [License](#license)
+25. [Offline token verification](#offline-token-verification)
+26. [License](#license)
 
 ---
 
@@ -929,6 +930,81 @@ import 'platform/native_auth_client.dart'
 ```bash
 flutter build web --wasm
 ```
+
+---
+
+## Offline token verification
+
+Verify JWS compact tokens signed with `alg: EdDSA` (Ed25519) offline without contacting the server, such as for standalone licence validation, desktop apps, or PWAs.
+
+Implemented in **pure Dart** without dependencies on Flutter SDK, `dart:io` or `dart:html`: works on Flutter mobile/desktop/web (including WASM) as well as standalone Dart CLI, servers, and tests.
+
+```dart
+import 'package:awesome_flutter_auth/offline_tokens.dart';
+
+// 1. Configure the verifier with public keys (JWK OKP) and expectations
+final verifier = OfflineTokenVerifier(
+  keys: OkpKeySet.fromJwks(publicKeysJson['keys']), // or OkpKeySet.fromKeys(...)
+  expectedTyp: 'ita-license+jwt',
+  issuer: 'https://ita.example',
+  audience: 'ita-pwa',
+);
+
+// 2. Verify with throwing API
+try {
+  final result = verifier.verify(token, now: DateTime.now().toUtc());
+  print('Token valid for: ${result.claims['sub']}');
+  print('Plan: ${result.claims['plan']}');
+} on OfflineTokenException catch (e) {
+  print('Verification failed: ${e.reason.code} - ${e.message}');
+}
+
+// Or verify with non-throwing API:
+final check = verifier.tryVerify(token, now: DateTime.now().toUtc());
+if (check.isValid) {
+  final claims = check.result!.claims;
+  // Use claims...
+} else {
+  // Map typed reason to UI state:
+  switch (check.reason!) {
+    case OfflineTokenReason.expired:
+      // Licence expired
+      break;
+    case OfflineTokenReason.signatureInvalid:
+      // Tampered token
+      break;
+    case OfflineTokenReason.audInvalid:
+    case OfflineTokenReason.issInvalid:
+    case OfflineTokenReason.typInvalid:
+    case OfflineTokenReason.algNotAllowed:
+    case OfflineTokenReason.kidUnknown:
+    case OfflineTokenReason.claimsInvalid:
+    case OfflineTokenReason.malformed:
+      // Invalid licence
+      break;
+  }
+}
+```
+
+### Verification checks & security guarantees
+
+Checks are performed strictly in order:
+
+| # | Check | Reason Code |
+|---|---|---|
+| 1 | Exactly 3 parts, non-empty header/payload, canonical base64url, valid JSON | `malformed` |
+| 2 | `alg == "EdDSA"` exactly (rejects `none`, `HS256`, `Ed25519`, ...) | `alg_not_allowed` |
+| 3 | `typ` matches `expectedTyp` | `typ_invalid` |
+| 4 | Header contains no `crit` extensions | `malformed` |
+| 5 | `kid` is a non-empty string and present in `keys` | `kid_unknown` |
+| 6 | Signature is canonical base64url, 64 bytes, canonical scalar (`S < L`), and Ed25519-valid | `signature_invalid` |
+| 7 | Claim types (`exp`, `iat`, `ent` integers; strings non-empty) | `claims_invalid` |
+| 8 | `aud` matches expected audience | `aud_invalid` |
+| 9 | `iss` matches expected issuer | `iss_invalid` |
+| 10 | `exp <= now` (integer seconds comparison) | `expired` |
+
+- **No `Error` leaks**: Any malformed input string safely evaluates to a typed failure.
+- **Canonical encoding**: Strict checks against base64url malleability and non-canonical scalar encodings (`S < L`).
 
 ---
 
