@@ -16,24 +16,37 @@ class AuthResult<T> {
   /// An optional machine-readable error code (e.g. `"SESSION_REVOKED"`).
   final String? errorCode;
 
+  /// The HTTP status code of the response that caused the failure, or `null`.
+  final int? statusCode;
+
   const AuthResult._({
     required this.success,
     this.data,
     this.error,
     this.errorCode,
+    this.statusCode,
   });
 
   /// Creates a successful result with optional [data].
   factory AuthResult.success([T? data]) =>
       AuthResult._(success: true, data: data);
 
-  /// Creates a failed result with the given [error] message and optional [errorCode].
-  factory AuthResult.failure(String error, {String? errorCode}) =>
-      AuthResult._(success: false, error: error, errorCode: errorCode);
+  /// Creates a failed result with the given [error] message and optional [errorCode] and [statusCode].
+  factory AuthResult.failure(
+    String error, {
+    String? errorCode,
+    int? statusCode,
+  }) =>
+      AuthResult._(
+        success: false,
+        error: error,
+        errorCode: errorCode,
+        statusCode: statusCode,
+      );
 
   @override
   String toString() =>
-      'AuthResult(success: $success, data: $data, error: $error)';
+      'AuthResult(success: $success, data: $data, error: $error, errorCode: $errorCode, statusCode: $statusCode)';
 }
 
 /// Result returned by [AuthClient.login].
@@ -62,6 +75,7 @@ class LoginResult extends AuthResult<AuthUser> {
     super.data,
     super.error,
     super.errorCode,
+    super.statusCode,
     this.requires2fa = false,
     this.requires2FASetup = false,
     this.tempToken,
@@ -86,8 +100,17 @@ class LoginResult extends AuthResult<AuthUser> {
         availableMethods: availableMethods,
       );
 
-  factory LoginResult.failure(String error, {String? errorCode}) =>
-      LoginResult._(success: false, error: error, errorCode: errorCode);
+  factory LoginResult.failure(
+    String error, {
+    String? errorCode,
+    int? statusCode,
+  }) =>
+      LoginResult._(
+        success: false,
+        error: error,
+        errorCode: errorCode,
+        statusCode: statusCode,
+      );
 }
 
 /// Data returned when setting up TOTP two-factor authentication.

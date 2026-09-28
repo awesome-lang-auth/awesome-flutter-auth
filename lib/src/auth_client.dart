@@ -170,7 +170,17 @@ abstract class AuthClient {
   // Account management
   // ---------------------------------------------------------------------------
 
-  Future<AuthResult<void>> deleteAccount();
+  /// Deletes the current user's account.
+  ///
+  /// Sends a `DELETE` request to [path] (or [AuthOptions.deleteAccountPath],
+  /// falling back to `'/account'` relative to [AuthOptions.apiPrefix]).
+  /// On 2xx, resets local session state and redirects to login if not headless.
+  Future<AuthResult<void>> deleteAccount({String? path});
+
+  /// Clears the local session state (user, tokens) and emits an
+  /// [AuthEventType.loggedOut] event without making a network request or
+  /// triggering a redirect.
+  void clearLocalSession();
 
   // ---------------------------------------------------------------------------
   // Authenticated HTTP client (interceptor / guard)

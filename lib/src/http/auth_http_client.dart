@@ -84,9 +84,16 @@ class AuthHttpClient extends http.BaseClient {
   // URL helpers
   // -------------------------------------------------------------------------
 
-  Uri _buildUri(String path) {
+  Uri _buildUri(String path, {bool isAbsolute = false}) {
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return Uri.parse(path);
+    }
+    if (isAbsolute) {
+      if (_apiPrefix.startsWith('http://') || _apiPrefix.startsWith('https://')) {
+        final base = Uri.parse(_apiPrefix);
+        return base.replace(path: path);
+      }
+      return Uri(path: path);
     }
     if (_apiPrefix.startsWith('http://') || _apiPrefix.startsWith('https://')) {
       return Uri.parse('$_apiPrefix$path');
@@ -121,6 +128,7 @@ class AuthHttpClient extends http.BaseClient {
     String path,
     Map<String, String>? extra, {
     bool includeAuthHeaders = true,
+    bool isAbsolute = false,
   }) async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
@@ -129,7 +137,7 @@ class AuthHttpClient extends http.BaseClient {
     };
 
     if (includeAuthHeaders) {
-      final url = _buildUri(path).toString();
+      final url = _buildUri(path, isAbsolute: isAbsolute).toString();
       final csrf = _csrfProvider?.call(url);
       if (csrf != null) headers['X-CSRF-Token'] = csrf;
 
@@ -178,8 +186,9 @@ class AuthHttpClient extends http.BaseClient {
   Future<http.Response> apiDelete(
     String path, {
     Map<String, String>? headers,
+    bool isAbsolute = false,
   }) =>
-      _send('DELETE', path, headers: headers);
+      _send('DELETE', path, headers: headers, isAbsolute: isAbsolute);
 
   // -------------------------------------------------------------------------
   // Core send logic
@@ -191,17 +200,28 @@ class AuthHttpClient extends http.BaseClient {
     Map<String, String>? headers,
     Object? body,
     Map<String, String>? queryParameters,
+    bool isAbsolute = false,
   }) async {
-    final allHeaders = await _buildHeaders(path, headers);
-    final response =
-        await _rawSend(method, path, allHeaders, body, queryParameters);
+    final allHeaders =
+        await _buildHeaders(path, headers, isAbsolute: isAbsolute);
+    final response = await _rawSend(
+      method,
+      path,
+      allHeaders,
+      body,
+      queryParameters,
+      isAbsolute: isAbsolute,
+    );
 
     await _captureBearerTokens(response);
 
     if ((response.statusCode == 401 || response.statusCode == 403) &&
         !_isExcludedEndpoint(path)) {
       return _handleUnauthorized(method, path, response,
-          headers: headers, body: body, queryParameters: queryParameters);
+          headers: headers,
+          body: body,
+          queryParameters: queryParameters,
+          isAbsolute: isAbsolute);
     }
 
     return response;
@@ -235,9 +255,10 @@ class AuthHttpClient extends http.BaseClient {
     String path,
     Map<String, String> headers,
     Object? body,
-    Map<String, String>? queryParameters,
-  ) async {
-    var uri = _buildUri(path);
+    Map<String, String>? queryParameters, {
+    bool isAbsolute = false,
+  }) async {
+    var uri = _buildUri(path, isAbsolute: isAbsolute);
     if (queryParameters != null && queryParameters.isNotEmpty) {
       uri = uri.replace(queryParameters: {
         ...uri.queryParameters,
@@ -286,6 +307,7 @@ class AuthHttpClient extends http.BaseClient {
     Map<String, String>? headers,
     Object? body,
     Map<String, String>? queryParameters,
+    bool isAbsolute = false,
   }) async {
     if (_isSessionRevoked(response)) {
       await _onLogout?.call(revoked: true);
@@ -294,8 +316,10 @@ class AuthHttpClient extends http.BaseClient {
 
     final refreshed = await _doRefresh();
     if (refreshed) {
-      final retryHeaders = await _buildHeaders(path, headers);
-      return _rawSend(method, path, retryHeaders, body, queryParameters);
+      final retryHeaders =
+          await _buildHeaders(path, headers, isAbsolute: isAbsolute);
+      return _rawSend(method, path, retryHeaders, body, queryParameters,
+          isAbsolute: isAbsolute);
     } else {
       await _onLogout?.call(revoked: false);
       return response;
