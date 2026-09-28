@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:http/http.dart' as http;
 
 import '../auth_client.dart';
@@ -37,8 +39,16 @@ class NativeAuthClient extends BaseAuthClient {
 
   @override
   Future<void> handleLogout({bool revoked = false}) async {
+    httpClient.clearTokens();
     await _storage.clear();
     return super.handleLogout(revoked: revoked);
+  }
+
+  @override
+  void clearLocalSession() {
+    httpClient.clearTokens();
+    unawaited(_storage.clear());
+    super.clearLocalSession();
   }
 
   // On native there is no SSE / EventSource — return an empty stream.

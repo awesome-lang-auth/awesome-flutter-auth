@@ -938,4 +938,153 @@ void main() {
       expect(result.error, equals('Account cannot be deleted'));
     });
   });
+
+  group('AuthClient — Issue #29 fixes', () {
+    test(
+        'clearLocalSession clears token storage on native and subsequent request has no Authorization header',
+        () async {
+      await storage.writeAccessToken('native-access-token');
+      await storage.writeRefreshToken('native-refresh-token');
+
+      authClient.clearLocalSession();
+
+      expect(await storage.readAccessToken(), isNull);
+      expect(await storage.readRefreshToken(), isNull);
+
+      // Subsequent /me request must NOT carry Authorization header
+      when(() => mockClient.get(
+            Uri.parse('https://api.example.com/auth/me'),
+            headers: any(named: 'headers'),
+          )).thenAnswer((_) async => jsonResponse(401, {'error': 'Unauthorized'}));
+
+      await authClient.checkSession();
+
+      final captured = verify(() => mockClient.get(
+            Uri.parse('https://api.example.com/auth/me'),
+            headers: captureAny(named: 'headers'),
+          )).captured;
+      final headers = captured.first as Map<String, String>;
+      expect(headers.containsKey('Authorization'), isFalse);
+    });
+
+    test(
+        'deleteAccount on 2xx clears token storage on native and subsequent request has no Authorization header',
+        () async {
+      await storage.writeAccessToken('native-access-token');
+      await storage.writeRefreshToken('native-refresh-token');
+
+      final deleteUri = Uri.parse('https://api.example.com/auth/account');
+      when(() => mockClient.delete(deleteUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(200, {'success': true}));
+
+      final result = await authClient.deleteAccount();
+      expect(result.success, isTrue);
+
+      expect(await storage.readAccessToken(), isNull);
+      expect(await storage.readRefreshToken(), isNull);
+
+      // Subsequent /me request must NOT carry Authorization header
+      when(() => mockClient.get(
+            Uri.parse('https://api.example.com/auth/me'),
+            headers: any(named: 'headers'),
+          )).thenAnswer((_) async => jsonResponse(401, {'error': 'Unauthorized'}));
+
+      await authClient.checkSession();
+
+      final captured = verify(() => mockClient.get(
+            Uri.parse('https://api.example.com/auth/me'),
+            headers: captureAny(named: 'headers'),
+          )).captured;
+      final headers = captured.first as Map<String, String>;
+      expect(headers.containsKey('Authorization'), isFalse);
+    });
+
+    test(
+        'login() handles non-string error payloads gracefully without throwing',
+        () async {
+      // Object error: {"error": {"message": "Invalid password", "code": "WRONG_PASSWORD"}}
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/login'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(400, {
+            'error': {'message': 'Invalid password', 'code': 'WRONG_PASSWORD'},
+          }));
+
+      final result = await authClient.login('test@example.com', 'badpass');
+      expect(result.success, isFalse);
+      expect(result.error, equals('Invalid password'));
+      expect(result.errorCode, equals('WRONG_PASSWORD'));
+      expect(result.statusCode, equals(400));
+
+      // Number error: {"error": 500}
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/login'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(500, {'error': 500}));
+
+      final result2 = await authClient.login('test@example.com', 'badpass');
+      expect(result2.success, isFalse);
+      expect(result2.statusCode, equals(500));
+      expect(result2.error, equals('Login failed'));
+    });
+
+    test(
+        'register() handles non-string error payloads gracefully without throwing',
+        () async {
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/register'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(400, {
+            'error': {'message': 'Email in use', 'code': 'EMAIL_EXISTS'},
+          }));
+
+      final result =
+          await authClient.register('test@example.com', 'pass', 'A', 'B');
+      expect(result.success, isFalse);
+      expect(result.error, equals('Email in use'));
+      expect(result.errorCode, equals('EMAIL_EXISTS'));
+      expect(result.statusCode, equals(400));
+
+      // Number error
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/register'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(400, {'error': 422}));
+
+      final result2 =
+          await authClient.register('test@example.com', 'pass', 'A', 'B');
+      expect(result2.success, isFalse);
+      expect(result2.error, equals('Request failed (400)'));
+    });
+
+    test(
+        'deleteAccount(path: "account") without leading slash resolves to {prefix}/account',
+        () async {
+      final targetUri = Uri.parse('https://api.example.com/auth/account');
+      when(() => mockClient.delete(targetUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(200, {'success': true}));
+
+      final result = await authClient.deleteAccount(path: 'account');
+      expect(result.success, isTrue);
+      verify(() => mockClient.delete(targetUri, headers: any(named: 'headers')))
+          .called(1);
+    });
+
+    test(
+        'deleteAccount(path: "/api/account?hard=1") preserves query string without encoding ? as %3F',
+        () async {
+      final targetUri = Uri.parse('https://api.example.com/api/account?hard=1');
+      when(() => mockClient.delete(targetUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(200, {'success': true}));
+
+      final result = await authClient.deleteAccount(path: '/api/account?hard=1');
+      expect(result.success, isTrue);
+      verify(() => mockClient.delete(targetUri, headers: any(named: 'headers')))
+          .called(1);
+    });
+  });
 }

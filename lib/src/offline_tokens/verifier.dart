@@ -349,7 +349,9 @@ class OfflineTokenVerifier {
     // -------------------------------------------------------------------------
     // 10. Check: exp <= now (integer seconds)
     // Failure reason: expired
-    // -------------------------------------------------------------------------
+    // Note: falls back to DateTime.now().toUtc() when neither now nor clock is
+    // provided. Consumers requiring a monotonic or server-synchronized clock
+    // should pass `now` explicitly.
     final effectiveNow = now ?? (clock?.call() ?? DateTime.now().toUtc());
     final nowSeconds = effectiveNow.millisecondsSinceEpoch ~/ 1000;
     if (exp <= nowSeconds) {
