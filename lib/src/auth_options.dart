@@ -30,6 +30,13 @@ class AuthOptions {
   /// Defaults to [InMemoryTokenStorage] when not provided.
   final TokenStorage? tokenStorage;
 
+  /// Custom path or endpoint for deleting accounts.
+  ///
+  /// Defaults to `null`, which falls back to `'/account'` (relative to [apiPrefix]).
+  /// When set to an absolute or root-relative path (e.g. `'/api/account'`),
+  /// it overrides [apiPrefix].
+  final String? deleteAccountPath;
+
   const AuthOptions({
     this.apiPrefix = '/auth',
     this.homeUrl = '/',
@@ -37,6 +44,7 @@ class AuthOptions {
     this.headless = false,
     this.initializeOnStartup = true,
     this.tokenStorage,
+    this.deleteAccountPath,
   });
 
   /// Returns the effective login URL (defaults to `$apiPrefix/ui/login`).

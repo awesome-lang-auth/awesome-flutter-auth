@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.10.3
+
+### Added
+
+- `AuthResult.statusCode` / `LoginResult.statusCode`: carries the HTTP status code of the failed response ([#27](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/27)).
+- `clearLocalSession()` on `AuthClient`: resets local session state (user, tokens) and emits `AuthEventType.loggedOut` without sending network requests or triggering redirects ([#27](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/27)).
+- `AuthOptions.deleteAccountPath` and optional `path` parameter on `deleteAccount({String? path})`: enables consumers mounting account deletion at custom endpoints (e.g. root-relative `/api/account`) to use `deleteAccount` with full CSRF protection and automatic local state reset ([#27](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/27)).
+
+### Fixed
+
+- `login()` and `register()` now preserve server error codes and status codes: `errorCode` is extracted from `code` (falling back to `error`), and `error` falls back to `data['error']` when `message` is absent ([#27](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/27)).
+- All client operation failures through `BaseAuthClient` consistently populate `statusCode` and `errorCode`.
+
 ## 1.10.2
 
 ### Added

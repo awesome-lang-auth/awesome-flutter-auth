@@ -105,6 +105,23 @@ abstract class BaseAuthClient implements AuthClient {
     return 'Request failed (${response.statusCode})';
   }
 
+  String? _errorCode(http.Response response) {
+    final body = _parseBody(response);
+    if (body != null) {
+      final code = body['code'];
+      if (code is String && code.isNotEmpty) return code;
+      final error = body['error'];
+      if (error is String && error.isNotEmpty) return error;
+    }
+    return null;
+  }
+
+  AuthResult<T> _failure<T>(http.Response response) => AuthResult<T>.failure(
+        _errorMessage(response),
+        errorCode: _errorCode(response),
+        statusCode: response.statusCode,
+      );
+
   // -------------------------------------------------------------------------
   // Session
   // -------------------------------------------------------------------------
@@ -170,7 +187,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -179,7 +196,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   // -------------------------------------------------------------------------
@@ -214,10 +231,16 @@ abstract class BaseAuthClient implements AuthClient {
       }
     }
 
+    final errorMessage = data != null
+        ? (data['message'] as String?) ??
+            (data['error'] as String?) ??
+            'Login failed'
+        : 'Login failed (${response.statusCode})';
+
     return LoginResult.failure(
-      data != null
-          ? (data['message'] as String?) ?? 'Login failed'
-          : 'Login failed (${response.statusCode})',
+      errorMessage,
+      errorCode: _errorCode(response),
+      statusCode: response.statusCode,
     );
   }
 
@@ -243,7 +266,7 @@ abstract class BaseAuthClient implements AuthClient {
       final userId = data?['userId'] as String? ?? data?['id'] as String?;
       return AuthResult.success(userId);
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure<String>(response);
   }
 
   @override
@@ -265,7 +288,7 @@ abstract class BaseAuthClient implements AuthClient {
       await checkSession();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   // -------------------------------------------------------------------------
@@ -279,7 +302,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -291,7 +314,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -307,7 +330,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -325,7 +348,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -336,7 +359,7 @@ abstract class BaseAuthClient implements AuthClient {
       await _emitLoggedInEvent();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -346,7 +369,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   // -------------------------------------------------------------------------
@@ -360,7 +383,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -371,7 +394,7 @@ abstract class BaseAuthClient implements AuthClient {
       await _emitLoggedInEvent();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -381,7 +404,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -392,7 +415,7 @@ abstract class BaseAuthClient implements AuthClient {
       await _emitLoggedInEvent();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -403,7 +426,7 @@ abstract class BaseAuthClient implements AuthClient {
       await checkSession();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   // -------------------------------------------------------------------------
@@ -424,7 +447,7 @@ abstract class BaseAuthClient implements AuthClient {
         }
       }
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -437,7 +460,7 @@ abstract class BaseAuthClient implements AuthClient {
       await checkSession();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -451,7 +474,7 @@ abstract class BaseAuthClient implements AuthClient {
       await _emitLoggedInEvent();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -461,7 +484,7 @@ abstract class BaseAuthClient implements AuthClient {
       await checkSession();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   // -------------------------------------------------------------------------
@@ -474,7 +497,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -487,7 +510,7 @@ abstract class BaseAuthClient implements AuthClient {
       await checkSession();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -497,7 +520,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -509,7 +532,7 @@ abstract class BaseAuthClient implements AuthClient {
       _eventsController.add(const AuthEvent(type: AuthEventType.emailChanged));
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   // -------------------------------------------------------------------------
@@ -524,7 +547,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -536,7 +559,7 @@ abstract class BaseAuthClient implements AuthClient {
       await checkSession();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -553,7 +576,7 @@ abstract class BaseAuthClient implements AuthClient {
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -564,7 +587,7 @@ abstract class BaseAuthClient implements AuthClient {
       await _emitLoggedInEvent();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   @override
@@ -588,7 +611,7 @@ abstract class BaseAuthClient implements AuthClient {
       await checkSession();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure(response);
   }
 
   // -------------------------------------------------------------------------
@@ -596,15 +619,31 @@ abstract class BaseAuthClient implements AuthClient {
   // -------------------------------------------------------------------------
 
   @override
-  Future<AuthResult<void>> deleteAccount() async {
-    final response = await httpClient.apiDelete('/account');
+  void clearLocalSession() {
+    _state.setUser(null);
+    _eventsController.add(const AuthEvent(type: AuthEventType.loggedOut));
+  }
+
+  @override
+  Future<AuthResult<void>> deleteAccount({String? path}) async {
+    final customPath = path ?? options.deleteAccountPath;
+    final http.Response response;
+    if (customPath != null) {
+      final isAbsolute = customPath.startsWith('/') ||
+          customPath.startsWith('http://') ||
+          customPath.startsWith('https://');
+      response = await httpClient.apiDelete(customPath, isAbsolute: isAbsolute);
+    } else {
+      response = await httpClient.apiDelete('/account');
+    }
+
     if (response.statusCode >= 200 && response.statusCode < 300) {
       _state.setUser(null);
       _eventsController.add(const AuthEvent(type: AuthEventType.loggedOut));
       if (!options.headless) redirectToLogin();
       return AuthResult.success();
     }
-    return AuthResult.failure(_errorMessage(response));
+    return _failure<void>(response);
   }
 
   // -------------------------------------------------------------------------

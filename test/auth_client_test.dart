@@ -694,4 +694,248 @@ void main() {
       expect(user, isNull);
     });
   });
+
+  // Issue #27: Login/register failures lose status and error code; deleteAccount() path is hardcoded.
+  group('AuthClient — Issue #27: login and register error details', () {
+    test('401 login carries server errorCode, statusCode 401, and falls back to error',
+        () async {
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/login'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(
+            401,
+            {
+              'error': 'Invalid credentials',
+              'code': 'INVALID_CREDENTIALS',
+            },
+          ));
+
+      final result = await authClient.login('test@example.com', 'badpass');
+
+      expect(result.success, isFalse);
+      expect(result.statusCode, equals(401));
+      expect(result.errorCode, equals('INVALID_CREDENTIALS'));
+      expect(result.error, equals('Invalid credentials'));
+    });
+
+    test('403 login with EMAIL_VERIFICATION_REQUIRED preserves code and status',
+        () async {
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/login'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(
+            403,
+            {
+              'error': 'Email not verified',
+              'code': 'EMAIL_VERIFICATION_REQUIRED',
+            },
+          ));
+
+      final result = await authClient.login('test@example.com', 'pass');
+
+      expect(result.success, isFalse);
+      expect(result.statusCode, equals(403));
+      expect(result.errorCode, equals('EMAIL_VERIFICATION_REQUIRED'));
+      expect(result.error, equals('Email not verified'));
+    });
+
+    test('429 rate limit login carries statusCode 429 and error string as code fallback',
+        () async {
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/login'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(
+            429,
+            {'error': 'Too many attempts'},
+          ));
+
+      final result = await authClient.login('test@example.com', 'pass');
+
+      expect(result.success, isFalse);
+      expect(result.statusCode, equals(429));
+      expect(result.errorCode, equals('Too many attempts'));
+      expect(result.error, equals('Too many attempts'));
+    });
+
+    test('error prefers message over error when both are present', () async {
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/login'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(
+            400,
+            {
+              'message': 'Custom user message',
+              'error': 'BAD_REQUEST',
+              'code': 'VALIDATION_FAILED',
+            },
+          ));
+
+      final result = await authClient.login('test@example.com', 'pass');
+
+      expect(result.error, equals('Custom user message'));
+      expect(result.errorCode, equals('VALIDATION_FAILED'));
+      expect(result.statusCode, equals(400));
+    });
+
+    test('409 register carries errorCode USER_EXISTS and statusCode 409',
+        () async {
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/register'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(
+            409,
+            {
+              'error': 'User already exists',
+              'code': 'USER_EXISTS',
+            },
+          ));
+
+      final result = await authClient.register(
+        'existing@example.com',
+        'password',
+        'First',
+        'Last',
+      );
+
+      expect(result.success, isFalse);
+      expect(result.statusCode, equals(409));
+      expect(result.errorCode, equals('USER_EXISTS'));
+      expect(result.error, equals('User already exists'));
+    });
+  });
+
+  group('AuthClient — Issue #27: deleteAccount and clearLocalSession', () {
+    test('clearLocalSession emits loggedOut, clears state and makes no request',
+        () async {
+      // Simulate authenticated state.
+      when(() => mockClient.get(
+            Uri.parse('https://api.example.com/auth/me'),
+            headers: any(named: 'headers'),
+          )).thenAnswer((_) async => jsonResponse(200, _testUser));
+      await authClient.checkSession();
+      expect(authClient.state.isAuthenticated, isTrue);
+
+      final events = <AuthEvent>[];
+      final sub = authClient.events.listen(events.add);
+
+      // Call clearLocalSession.
+      authClient.clearLocalSession();
+
+      expect(authClient.state.isAuthenticated, isFalse);
+      expect(authClient.state.currentUser, isNull);
+      await Future<void>.delayed(Duration.zero);
+      await sub.cancel();
+
+      expect(events, hasLength(1));
+      expect(events.first.type, equals(AuthEventType.loggedOut));
+      // No DELETE or POST request made.
+      verifyNever(() => mockClient.delete(any(), headers: any(named: 'headers')));
+      verifyNever(() => mockClient.post(any(),
+          headers: any(named: 'headers'), body: any(named: 'body')));
+    });
+
+    test('deleteAccount() default calls {apiPrefix}/account and resets state on 200',
+        () async {
+      when(() => mockClient.get(
+            Uri.parse('https://api.example.com/auth/me'),
+            headers: any(named: 'headers'),
+          )).thenAnswer((_) async => jsonResponse(200, _testUser));
+      await authClient.checkSession();
+
+      final deleteUri = Uri.parse('https://api.example.com/auth/account');
+      when(() => mockClient.delete(deleteUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(200, {'success': true}));
+
+      final result = await authClient.deleteAccount();
+
+      expect(result.success, isTrue);
+      expect(authClient.state.isAuthenticated, isFalse);
+      verify(() => mockClient.delete(deleteUri, headers: any(named: 'headers')))
+          .called(1);
+    });
+
+    test('deleteAccount(path: "/api/account") calls root-relative path with CSRF',
+        () async {
+      final customClient = MockHttpClient();
+      final webStorage = InMemoryTokenStorage();
+      final options = const AuthOptions(
+        apiPrefix: 'https://api.example.com/auth',
+        headless: true,
+        initializeOnStartup: false,
+      );
+
+      final authHttp = AuthHttpClient(
+        inner: customClient,
+        apiPrefix: options.apiPrefix,
+        csrfProvider: (_) => 'csrf-secret-token',
+        bearerProvider: webStorage.readAccessToken,
+      );
+      final client = NativeAuthClient(options, authHttp, webStorage);
+
+      final targetUri = Uri.parse('https://api.example.com/api/account');
+      when(() => customClient.delete(targetUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(200, {'success': true}));
+
+      final result = await client.deleteAccount(path: '/api/account');
+
+      expect(result.success, isTrue);
+      final captured = verify(() =>
+              customClient.delete(targetUri, headers: captureAny(named: 'headers')))
+          .captured;
+      final headers = captured.first as Map<String, String>;
+      expect(headers['X-CSRF-Token'], equals('csrf-secret-token'));
+    });
+
+    test('deleteAccount respects AuthOptions.deleteAccountPath option',
+        () async {
+      final customClient = MockHttpClient();
+      final options = const AuthOptions(
+        apiPrefix: 'https://api.example.com/auth',
+        deleteAccountPath: '/api/account',
+        headless: true,
+        initializeOnStartup: false,
+      );
+
+      final authHttp = AuthHttpClient(
+        inner: customClient,
+        apiPrefix: options.apiPrefix,
+      );
+      final client = NativeAuthClient(options, authHttp, InMemoryTokenStorage());
+
+      final targetUri = Uri.parse('https://api.example.com/api/account');
+      when(() => customClient.delete(targetUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(200, {'success': true}));
+
+      final result = await client.deleteAccount();
+
+      expect(result.success, isTrue);
+      verify(() => customClient.delete(targetUri, headers: any(named: 'headers')))
+          .called(1);
+    });
+
+    test('deleteAccount failure carries server statusCode and errorCode',
+        () async {
+      final deleteUri = Uri.parse('https://api.example.com/auth/account');
+      when(() => mockClient.delete(deleteUri, headers: any(named: 'headers')))
+          .thenAnswer((_) async => jsonResponse(
+                403,
+                {
+                  'error': 'Account cannot be deleted',
+                  'code': 'DELETE_BLOCKED',
+                },
+              ));
+
+      final result = await authClient.deleteAccount();
+
+      expect(result.success, isFalse);
+      expect(result.statusCode, equals(403));
+      expect(result.errorCode, equals('DELETE_BLOCKED'));
+      expect(result.error, equals('Account cannot be deleted'));
+    });
+  });
 }
