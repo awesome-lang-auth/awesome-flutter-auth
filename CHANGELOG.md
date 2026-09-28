@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.10.4
+
+### Fixed
+
+- **Token clearing on Native platforms** ([#29](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/29)):
+  - `clearLocalSession()` and successful `deleteAccount()` on `NativeAuthClient` now explicitly clear `TokenStorage` and reset `AuthHttpClient._refreshToken`. Subsequent requests do not leak stale `Authorization: Bearer` headers.
+- **Robust error message extraction** ([#29](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/29)):
+  - `login()` and `register()` now safely inspect non-string `error` values (such as nested objects `{"error": {"message": "..."}}` or numbers `{"error": 500}`) without throwing `_TypeError`. Nested error messages and codes are extracted when present.
+- **`deleteAccount(path:)` URL resolution** ([#29](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/29)):
+  - Paths without a leading slash (e.g. `deleteAccount(path: 'account')`) are resolved to `{apiPrefix}/account` rather than concatenating without a separator.
+  - Paths containing query parameters (e.g. `deleteAccount(path: '/api/account?hard=1')`) preserve the query string instead of percent-encoding `?` into the path (`%3F`).
+
+### Documentation
+
+- Updated README to document `deleteAccountPath`, `clearLocalSession()`, and `AuthResult.statusCode`.
+- Added clock synchronization note for `verify()` and `tryVerify()` fallback to `DateTime.now().toUtc()`.
+
 ## 1.10.3
 
 ### Added

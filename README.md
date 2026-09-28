@@ -139,6 +139,7 @@ final auth = AuthClient(
     homeUrl: '/',                    // Redirect destination after successful login (default: '/')
     loginUrl: '/login',              // Redirect destination when session expires (web, headless: false only)
                                      // Defaults to '$apiPrefix/ui/login' when omitted
+    deleteAccountPath: '/api/account', // Custom path for account deletion (default: null, falls back to '$apiPrefix/account')
     headless: false,                 // true = disable automatic redirects; listen to events instead
     initializeOnStartup: true,       // Calls checkSession() automatically on construction (default: true)
     tokenStorage: MySecureStorage(), // Native only: custom persistent storage for Bearer tokens
@@ -615,6 +616,44 @@ await auth.unlinkAccount('github', providerAccountId);
 
 ---
 
+## Account deletion & local session management
+
+### Deleting an account (`deleteAccount`)
+
+Permanently deletes the currently authenticated user's account:
+
+```dart
+// Default: sends DELETE to '$apiPrefix/account'
+final result = await auth.deleteAccount();
+
+// Custom path: specify a custom relative, root-relative, or absolute path
+final result = await auth.deleteAccount(path: '/api/v1/user/delete?hard=true');
+```
+
+On success (HTTP 2xx):
+- Clears local user state and token storage (native) / active session (web).
+- Emits `AuthEventType.loggedOut`.
+- Redirects to `loginUrl` if `headless: false`.
+
+On failure, returns an `AuthResult` carrying `statusCode`, `errorCode`, and `error`.
+
+You can also set a default custom deletion path via `AuthOptions(deleteAccountPath: '/api/account')`.
+
+### Clearing local session without network request (`clearLocalSession`)
+
+When you want to reset all local state immediately (e.g. when an external service returns 401 or during local testing) without making a request to the server's `/logout` endpoint or triggering an automatic redirect:
+
+```dart
+auth.clearLocalSession();
+```
+
+- Resets `currentUser` to `null`.
+- Clears stored tokens in `TokenStorage` and the in-memory refresh token on native.
+- Emits `AuthEventType.loggedOut`.
+- Does not make any HTTP requests and does not trigger redirects.
+
+---
+
 ## AuthUser model
 
 Every field returned by the backend `/me` endpoint is mapped to this model.
@@ -667,6 +706,7 @@ Most `AuthClient` methods return `AuthResult<T>`. `LoginResult` is a subtype ret
 | `data` | `T?` | Payload on success (`null` on failure) |
 | `error` | `String?` | Human-readable error message on failure |
 | `errorCode` | `String?` | Machine-readable error code (e.g. `"SESSION_REVOKED"`) |
+| `statusCode` | `int?` | HTTP status code from the server response, or `null` |
 
 ```dart
 final result = await auth.changePassword('old', 'new');
@@ -1005,6 +1045,9 @@ Checks are performed strictly in order:
 
 - **No `Error` leaks**: Any malformed input string safely evaluates to a typed failure.
 - **Canonical encoding**: Strict checks against base64url malleability and non-canonical scalar encodings (`S < L`).
+
+> **Clock synchronization note**:
+> `verify()` and `tryVerify()` fall back to `DateTime.now().toUtc()` when neither `now` nor `clock` is provided. Consumers that require a monotonic guard or strict server-synchronized time should always pass `now` explicitly (e.g. `now: syncedServerTime`).
 
 ---
 

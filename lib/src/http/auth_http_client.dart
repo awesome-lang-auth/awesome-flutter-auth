@@ -80,6 +80,11 @@ class AuthHttpClient extends http.BaseClient {
   void setRefreshHandler(Future<bool> Function() handler) =>
       _refreshHandler = handler;
 
+  /// Clears stored in-memory tokens (such as the refresh token on native).
+  void clearTokens() {
+    _refreshToken = null;
+  }
+
   // -------------------------------------------------------------------------
   // URL helpers
   // -------------------------------------------------------------------------
@@ -88,17 +93,36 @@ class AuthHttpClient extends http.BaseClient {
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return Uri.parse(path);
     }
+    final parsed = Uri.parse(path);
     if (isAbsolute) {
       if (_apiPrefix.startsWith('http://') || _apiPrefix.startsWith('https://')) {
         final base = Uri.parse(_apiPrefix);
-        return base.replace(path: path);
+        return base.replace(
+          path: parsed.path,
+          query: parsed.hasQuery ? parsed.query : null,
+        );
       }
-      return Uri(path: path);
+      return parsed;
     }
+    final prefix = _apiPrefix.endsWith('/')
+        ? _apiPrefix.substring(0, _apiPrefix.length - 1)
+        : _apiPrefix;
+    final normalizedPath =
+        parsed.path.startsWith('/') ? parsed.path : '/${parsed.path}';
+    final fullUrl = '$prefix$normalizedPath';
     if (_apiPrefix.startsWith('http://') || _apiPrefix.startsWith('https://')) {
-      return Uri.parse('$_apiPrefix$path');
+      final base = Uri.parse(prefix);
+      return base.replace(
+        path: normalizedPath.startsWith(base.path)
+            ? normalizedPath
+            : '${base.path}$normalizedPath'.replaceAll('//', '/'),
+        query: parsed.hasQuery ? parsed.query : null,
+      );
     }
-    return Uri(path: '$_apiPrefix$path');
+    return Uri(
+      path: fullUrl,
+      query: parsed.hasQuery ? parsed.query : null,
+    );
   }
 
   // -------------------------------------------------------------------------

@@ -98,9 +98,15 @@ abstract class BaseAuthClient implements AuthClient {
   String _errorMessage(http.Response response) {
     final body = _parseBody(response);
     if (body != null) {
-      return (body['message'] as String?) ??
-          (body['error'] as String?) ??
-          'Request failed (${response.statusCode})';
+      final msg = body['message'];
+      if (msg is String && msg.isNotEmpty) return msg;
+      final err = body['error'];
+      if (err is String && err.isNotEmpty) return err;
+      if (err is Map) {
+        final nestedMsg = err['message'];
+        if (nestedMsg is String && nestedMsg.isNotEmpty) return nestedMsg;
+      }
+      return 'Request failed (${response.statusCode})';
     }
     return 'Request failed (${response.statusCode})';
   }
@@ -112,6 +118,10 @@ abstract class BaseAuthClient implements AuthClient {
       if (code is String && code.isNotEmpty) return code;
       final error = body['error'];
       if (error is String && error.isNotEmpty) return error;
+      if (error is Map) {
+        final nestedCode = error['code'];
+        if (nestedCode is String && nestedCode.isNotEmpty) return nestedCode;
+      }
     }
     return null;
   }
@@ -214,8 +224,9 @@ abstract class BaseAuthClient implements AuthClient {
 
     if (response.statusCode == 200 || response.statusCode == 201) {
       if (data != null && data['requiresTwoFactor'] == true) {
+        final rawTempToken = data['tempToken'];
         return LoginResult.requires2FA(
-          tempToken: data['tempToken'] as String? ?? '',
+          tempToken: rawTempToken is String ? rawTempToken : '',
           availableMethods:
               (data['available2faMethods'] as List<dynamic>?)?.cast<String>() ??
                   [],
@@ -231,11 +242,25 @@ abstract class BaseAuthClient implements AuthClient {
       }
     }
 
-    final errorMessage = data != null
-        ? (data['message'] as String?) ??
-            (data['error'] as String?) ??
-            'Login failed'
-        : 'Login failed (${response.statusCode})';
+    String? message;
+    if (data != null) {
+      final msg = data['message'];
+      if (msg is String && msg.isNotEmpty) {
+        message = msg;
+      } else {
+        final err = data['error'];
+        if (err is String && err.isNotEmpty) {
+          message = err;
+        } else if (err is Map) {
+          final nestedMsg = err['message'];
+          if (nestedMsg is String && nestedMsg.isNotEmpty) {
+            message = nestedMsg;
+          }
+        }
+      }
+    }
+    final errorMessage = message ??
+        (data != null ? 'Login failed' : 'Login failed (${response.statusCode})');
 
     return LoginResult.failure(
       errorMessage,
@@ -263,7 +288,8 @@ abstract class BaseAuthClient implements AuthClient {
 
     final data = _parseBody(response);
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      final userId = data?['userId'] as String? ?? data?['id'] as String?;
+      final rawId = data?['userId'] ?? data?['id'];
+      final userId = rawId is String ? rawId : rawId?.toString();
       return AuthResult.success(userId);
     }
     return _failure<String>(response);
@@ -620,6 +646,7 @@ abstract class BaseAuthClient implements AuthClient {
 
   @override
   void clearLocalSession() {
+    httpClient.clearTokens();
     _state.setUser(null);
     _eventsController.add(const AuthEvent(type: AuthEventType.loggedOut));
   }
@@ -638,9 +665,7 @@ abstract class BaseAuthClient implements AuthClient {
     }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
-      _state.setUser(null);
-      _eventsController.add(const AuthEvent(type: AuthEventType.loggedOut));
-      if (!options.headless) redirectToLogin();
+      await handleLogout();
       return AuthResult.success();
     }
     return _failure<void>(response);

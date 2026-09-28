@@ -3,7 +3,7 @@ description: >-
   A Flutter/Dart authentication client for awesome-lang-auth servers.
   Supports web (including WASM) via cookie + CSRF and native platforms via
   Bearer token.
-version: 1.10.3
+version: 1.10.4
 homepage: https://github.com/awesome-lang-auth/awesome-flutter-auth
 repository: https://github.com/awesome-lang-auth/awesome-flutter-auth
 issue_tracker: https://github.com/awesome-lang-auth/awesome-flutter-auth/issues
