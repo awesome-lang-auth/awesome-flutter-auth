@@ -180,7 +180,11 @@ abstract class AuthClient {
   /// Clears the local session state (user, tokens) and emits an
   /// [AuthEventType.loggedOut] event without making a network request or
   /// triggering a redirect.
-  void clearLocalSession();
+  ///
+  /// User state and event are updated synchronously; the returned future
+  /// completes once the persisted tokens are cleared (native [TokenStorage]).
+  /// Requests issued before it completes wait for the clear.
+  Future<void> clearLocalSession();
 
   // ---------------------------------------------------------------------------
   // Authenticated HTTP client (interceptor / guard)

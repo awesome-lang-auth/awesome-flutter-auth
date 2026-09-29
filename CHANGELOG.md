@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.10.5
+
+### Security
+
+- **CSRF token never sent to a scheme-relative or foreign URI** ([#31](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/31)):
+  - `isSameOriginPure` treats a scheme-relative URL (`//host/...`) as cross-origin, including one pointing at the same host.
+  - `AuthHttpClient` takes the CSRF decision on the URI that is actually sent. `httpClient.send()` used to rebuild `request.url` under the API prefix, so `//evil.com/x` passed the same-origin check as `/x`. It never calls the CSRF provider for a scheme-relative target.
+  - `deleteAccount(path:)` and `AuthOptions.deleteAccountPath` reject scheme-relative paths (`//evil.com/x`, and `/\evil.com/x`, which `Uri.parse` normalises to `//evil.com/x`) and non-http(s) schemes. They return `AuthResult.failure` with `errorCode: 'INVALID_PATH'` and send no request.
+  - `apiGet`/`apiPost`/`apiPatch`/`apiDelete` throw `ArgumentError` for a scheme-relative path.
+
+### Fixed
+
+- **Path segments encoded again** ([#31](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/31)): `revokeSession()` and `unlinkAccount()` encode the interpolated segments (session handle, provider, providerAccountId) with `Uri.encodeComponent`. A `?`, `#` or `/` in an id now stays inside its segment instead of becoming a query, fragment or extra segment; this was a regression since 1.10.2. `getOAuthUrl()` encodes the provider segment too.
+- **Prefix and endpoint joined by path segments** ([#31](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/31)): the prefix path segments and the endpoint path segments are joined, with the same result for absolute and relative prefixes. Before, with an absolute prefix, the prefix was skipped when the endpoint merely started with the prefix path as a string: `https://ita.app/s` + `/sessions` resolved to `https://ita.app/sessions` and now resolves to `https://ita.app/s/sessions`.
+- **`NativeAuthClient.clearLocalSession()` awaits the token storage** ([#31](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/31)):
+  - It awaits `TokenStorage.clear()` and returns a `Future` that completes once the storage is cleared.
+  - Requests issued before then wait for the clear even if the call is not awaited, so they never carry the old `Authorization: Bearer` header with an asynchronous storage.
+  - User state and the `loggedOut` event are still updated synchronously.
+- **`deleteAccount(path: '')` falls back to `/account`** ([#31](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/31)): an empty or blank `path` (or `AuthOptions.deleteAccountPath`) is treated as unset. It falls back to `deleteAccountPath` if that is set, otherwise to `{apiPrefix}/account`.
+- **`available2faMethods` validated eagerly** ([#31](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/31)): non-string entries are dropped and a non-list value yields an empty list. Reading `LoginResult.availableMethods` no longer throws. A non-boolean `requires2FASetup` reads as `false` instead of throwing.
+
+### Changed
+
+- **`AuthClient.clearLocalSession()` returns `Future<void>`** (was `void`). Existing calls such as `auth.clearLocalSession();` still compile. Classes that implement or override `clearLocalSession()` with a `void` return type must change it to `Future<void>`.
+- **Endpoint paths are no longer de-duplicated against an absolute prefix.** With an absolute prefix, `httpClient.apiGet('/api/auth/me')` used to resolve to `https://host/api/auth/me` when the prefix was `https://host/api/auth`. It now resolves to `https://host/api/auth/api/auth/me`, the same as with a relative prefix. Pass paths relative to the prefix (`/me`), or use a full URL.
+
 ## 1.10.4
 
 ### Fixed

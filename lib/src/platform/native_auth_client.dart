@@ -44,11 +44,20 @@ class NativeAuthClient extends BaseAuthClient {
     return super.handleLogout(revoked: revoked);
   }
 
+  /// Clears the in-memory refresh token and the [TokenStorage], resets the
+  /// user and emits [AuthEventType.loggedOut].
+  ///
+  /// State and event are updated synchronously; the returned future completes
+  /// when the storage is cleared. Requests issued before that (even without
+  /// awaiting this method) wait for the clear, so they never carry the old
+  /// `Authorization` header (issue #31).
   @override
-  void clearLocalSession() {
+  Future<void> clearLocalSession() async {
     httpClient.clearTokens();
-    unawaited(_storage.clear());
-    super.clearLocalSession();
+    final clearing = _storage.clear();
+    httpClient.waitForTokenClear(clearing);
+    await super.clearLocalSession();
+    await clearing;
   }
 
   // On native there is no SSE / EventSource — return an empty stream.

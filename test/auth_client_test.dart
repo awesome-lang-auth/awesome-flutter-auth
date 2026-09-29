@@ -2,9 +2,11 @@ import 'dart:convert';
 
 import 'package:test/test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart' as http_testing;
 import 'package:mocktail/mocktail.dart';
 
 import 'package:awesome_flutter_auth/src/http/auth_http_client.dart';
+import 'package:awesome_flutter_auth/src/http/csrf_cookie_parser.dart';
 import 'package:awesome_flutter_auth/src/http/token_storage.dart';
 import 'package:awesome_flutter_auth/src/auth_events.dart';
 import 'package:awesome_flutter_auth/src/auth_options.dart';
@@ -14,6 +16,32 @@ import 'package:awesome_flutter_auth/src/models/session_info.dart';
 import 'package:awesome_flutter_auth/src/platform/native_auth_client.dart';
 
 class MockHttpClient extends Mock implements http.Client {}
+
+/// [TokenStorage] whose [clear] completes after a delay, like a secure
+/// storage plugin (issue #31).
+class SlowTokenStorage implements TokenStorage {
+  String? accessToken;
+  String? refreshToken;
+
+  @override
+  Future<String?> readAccessToken() async => accessToken;
+
+  @override
+  Future<void> writeAccessToken(String token) async => accessToken = token;
+
+  @override
+  Future<String?> readRefreshToken() async => refreshToken;
+
+  @override
+  Future<void> writeRefreshToken(String token) async => refreshToken = token;
+
+  @override
+  Future<void> clear() async {
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    accessToken = null;
+    refreshToken = null;
+  }
+}
 
 http.Response jsonResponse(int statusCode, [Map<String, dynamic>? body]) {
   return http.Response(
@@ -1085,6 +1113,286 @@ void main() {
       expect(result.success, isTrue);
       verify(() => mockClient.delete(targetUri, headers: any(named: 'headers')))
           .called(1);
+    });
+  });
+
+  group('AuthClient — Issue #31 fixes', () {
+    const windowOrigin = 'https://ita.app';
+    late List<http.Request> sent;
+
+    /// Builds a NativeAuthClient over a recording MockClient, with the same
+    /// CSRF wiring as the web factory (same-origin check on the URL).
+    NativeAuthClient build(
+      String prefix, {
+      TokenStorage? tokenStorage,
+      int status = 200,
+      String? deleteAccountPath,
+    }) {
+      sent = [];
+      final inner = http_testing.MockClient((r) async {
+        sent.add(r);
+        return http.Response('{}', status,
+            headers: {'content-type': 'application/json'});
+      });
+      final st = tokenStorage ?? InMemoryTokenStorage();
+      final authHttp = AuthHttpClient(
+        inner: inner,
+        apiPrefix: prefix,
+        csrfProvider: (url) =>
+            isSameOriginPure(url, prefix, windowOrigin) ? 'CSRF1' : null,
+        bearerProvider: st.readAccessToken,
+        bearerSetter: st.writeAccessToken,
+      );
+      return NativeAuthClient(
+        AuthOptions(
+          apiPrefix: prefix,
+          headless: true,
+          initializeOnStartup: false,
+          deleteAccountPath: deleteAccountPath,
+        ),
+        authHttp,
+        st,
+      );
+    }
+
+    for (final prefix in ['/api/auth', 'https://ita.app/api/auth']) {
+      for (final path in ['//evil.com/x', '/\\evil.com/x', 'javascript:x']) {
+        test(
+            'deleteAccount(path: "$path") with prefix $prefix is rejected '
+            'without any request', () async {
+          final client = build(prefix);
+          final events = <AuthEventType>[];
+          final sub = client.events.listen((e) => events.add(e.type));
+
+          final result = await client.deleteAccount(path: path);
+          await Future<void>.delayed(Duration.zero);
+          await sub.cancel();
+
+          expect(result.success, isFalse);
+          expect(result.errorCode, equals('INVALID_PATH'));
+          expect(sent, isEmpty);
+          expect(events, isEmpty);
+        });
+      }
+
+      test(
+          'deleteAccountPath option "//evil.com/x" with prefix $prefix is '
+          'rejected', () async {
+        final client = build(prefix, deleteAccountPath: '//evil.com/x');
+        final result = await client.deleteAccount();
+        expect(result.errorCode, equals('INVALID_PATH'));
+        expect(sent, isEmpty);
+      });
+
+      test(
+          'httpClient.send() to scheme-relative //evil.com/x with prefix '
+          '$prefix carries no CSRF token', () async {
+        final client = build(prefix);
+        await client.httpClient.delete(Uri.parse('//evil.com/x'));
+        expect(sent.single.url.host, equals('evil.com'));
+        expect(sent.single.headers.containsKey('X-CSRF-Token'), isFalse);
+      });
+
+      test(
+          'httpClient.send() to a foreign absolute URL with prefix $prefix '
+          'carries no CSRF token, same-origin requests still do', () async {
+        final client = build(prefix);
+        await client.httpClient.delete(Uri.parse('https://evil.com/x'));
+        await client.httpClient.delete(Uri.parse('https://ita.app/api/x'));
+        await client.httpClient.delete(Uri.parse('/api/x'));
+        expect(sent[0].headers.containsKey('X-CSRF-Token'), isFalse);
+        expect(sent[1].headers['X-CSRF-Token'], equals('CSRF1'));
+        expect(sent[2].headers['X-CSRF-Token'], equals('CSRF1'));
+      });
+
+      test('AuthHttpClient.apiDelete("//evil.com/x") throws with prefix $prefix',
+          () async {
+        final client = build(prefix);
+        await expectLater(
+          client.httpClient.apiDelete('//evil.com/x', isAbsolute: true),
+          throwsArgumentError,
+        );
+        await expectLater(
+          client.httpClient.apiDelete('//evil.com/x'),
+          throwsArgumentError,
+        );
+        expect(sent, isEmpty);
+      });
+
+      test('revokeSession keeps ?, # and / inside the segment ($prefix)',
+          () async {
+        final client = build(prefix);
+        await client.revokeSession('a?b#c');
+        await client.revokeSession('a/b');
+
+        final first = sent[0].url;
+        expect(first.pathSegments, equals(['api', 'auth', 'sessions', 'a?b#c']));
+        expect(first.hasQuery, isFalse);
+        expect(first.hasFragment, isFalse);
+        expect(first.path, equals('/api/auth/sessions/a%3Fb%23c'));
+
+        final second = sent[1].url;
+        expect(second.pathSegments, equals(['api', 'auth', 'sessions', 'a/b']));
+        expect(second.path, equals('/api/auth/sessions/a%2Fb'));
+      });
+
+      test('unlinkAccount encodes provider and providerAccountId ($prefix)',
+          () async {
+        final client = build(prefix);
+        await client.unlinkAccount('goo/gle', 'id?x=1#f');
+        // sent[1] is the /me refresh that follows a successful unlink.
+        expect(sent.first.method, equals('DELETE'));
+        final url = sent.first.url;
+        expect(url.pathSegments,
+            equals(['api', 'auth', 'linked-accounts', 'goo/gle', 'id?x=1#f']));
+        expect(url.hasQuery, isFalse);
+        expect(url.hasFragment, isFalse);
+      });
+    }
+
+    group('prefix and endpoint are joined by path segments', () {
+      final cases = <String, String>{
+        'https://ita.app/s': 'https://ita.app/s/sessions',
+        'https://ita.app/s/': 'https://ita.app/s/sessions',
+        '/s': '/s/sessions',
+        '/s/': '/s/sessions',
+        'https://ita.app': 'https://ita.app/sessions',
+        'https://ita.app/': 'https://ita.app/sessions',
+        'https://ita.app:8443/api/auth': 'https://ita.app:8443/api/auth/sessions',
+        '/api/auth': '/api/auth/sessions',
+      };
+      cases.forEach((prefix, expected) {
+        test('$prefix + /sessions -> $expected', () async {
+          final client = build(prefix);
+          await client.getActiveSessions();
+          expect(sent.single.url.toString(), equals(expected));
+        });
+      });
+
+      test(
+          'an endpoint that merely starts with the prefix path as a string '
+          'is still joined (https://ita.app/a + /about)', () async {
+        final client = build('https://ita.app/a');
+        await client.httpClient.apiGet('/about');
+        expect(sent.single.url.toString(), equals('https://ita.app/a/about'));
+      });
+
+      test('absolute and relative prefixes give the same path', () async {
+        final abs = build('https://ita.app/api/auth');
+        await abs.httpClient.apiGet('/api/auth/me');
+        await abs.httpClient.apiGet('/x', queryParameters: {'q': '1'});
+        final absPaths = sent.map((r) => '${r.url.path}?${r.url.query}').toList();
+
+        final rel = build('/api/auth');
+        await rel.httpClient.apiGet('/api/auth/me');
+        await rel.httpClient.apiGet('/x', queryParameters: {'q': '1'});
+        final relPaths = sent.map((r) => '${r.url.path}?${r.url.query}').toList();
+
+        expect(absPaths, equals(relPaths));
+        expect(relPaths,
+            equals(['/api/auth/api/auth/me?', '/api/auth/x?q=1']));
+      });
+    });
+
+    test(
+        'clearLocalSession() with an async storage: awaited, the next request '
+        'has no Authorization', () async {
+      final slow = SlowTokenStorage()..accessToken = 'OLD';
+      final client = build('/api/auth', tokenStorage: slow);
+
+      await client.clearLocalSession();
+      expect(slow.accessToken, isNull);
+
+      await client.checkSession();
+      expect(sent.first.headers.containsKey('Authorization'), isFalse);
+    });
+
+    test(
+        'clearLocalSession() with an async storage: not awaited, the next '
+        'request still waits for the clear and has no Authorization', () async {
+      final slow = SlowTokenStorage()..accessToken = 'OLD';
+      final client = build('/api/auth', tokenStorage: slow);
+      final events = <AuthEventType>[];
+      final sub = client.events.listen((e) => events.add(e.type));
+
+      // ignore: unawaited_futures
+      client.clearLocalSession();
+      // State is reset synchronously.
+      expect(client.state.isAuthenticated, isFalse);
+
+      await client.checkSession();
+      await sub.cancel();
+
+      expect(sent.first.headers.containsKey('Authorization'), isFalse);
+      expect(events, contains(AuthEventType.loggedOut));
+    });
+
+    for (final path in ['', '   ']) {
+      test('deleteAccount(path: "$path") falls back to {prefix}/account',
+          () async {
+        final client = build('https://ita.app/api/auth');
+        final result = await client.deleteAccount(path: path);
+        expect(result.success, isTrue);
+        expect(sent.single.method, equals('DELETE'));
+        expect(sent.single.url.toString(),
+            equals('https://ita.app/api/auth/account'));
+      });
+    }
+
+    test('deleteAccount(path: "") uses a non-empty deleteAccountPath option',
+        () async {
+      final client =
+          build('https://ita.app/api/auth', deleteAccountPath: '/api/account');
+      await client.deleteAccount(path: '');
+      expect(sent.single.url.toString(), equals('https://ita.app/api/account'));
+    });
+
+    test('deleteAccountPath option "" falls back to {prefix}/account',
+        () async {
+      final client = build('/api/auth', deleteAccountPath: '');
+      await client.deleteAccount();
+      expect(sent.single.url.toString(), equals('/api/auth/account'));
+    });
+
+    test('available2faMethods is validated eagerly: non-strings are dropped',
+        () async {
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/login'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(200, {
+            'requiresTwoFactor': true,
+            'tempToken': 't',
+            'available2faMethods': [1, 'totp', null, 'sms', {'x': 1}],
+            'requires2FASetup': 'yes',
+          }));
+
+      final result = await authClient.login('a@b.c', 'p');
+      expect(result.requires2fa, isTrue);
+      expect(result.availableMethods, equals(['totp', 'sms']));
+      expect(result.requires2FASetup, isFalse);
+    });
+
+    test('available2faMethods of the wrong type yields an empty list',
+        () async {
+      when(() => mockClient.post(
+            Uri.parse('https://api.example.com/auth/login'),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          )).thenAnswer((_) async => jsonResponse(200, {
+            'requiresTwoFactor': true,
+            'tempToken': 't',
+            'available2faMethods': 'totp',
+          }));
+
+      final result = await authClient.login('a@b.c', 'p');
+      expect(result.requires2fa, isTrue);
+      expect(result.availableMethods, isEmpty);
+    });
+
+    test('getOAuthUrl encodes the provider segment', () {
+      expect(authClient.getOAuthUrl('a/b?c'),
+          equals('https://api.example.com/auth/oauth/a%2Fb%3Fc'));
     });
   });
 }
