@@ -22,7 +22,10 @@ String? parseCsrfFromCookies(String cookieString) {
 /// Returns `true` when [url] is considered same-origin with the backend
 /// determined by [apiPrefix] and [windowOrigin]:
 ///
-/// - Relative [url] (no scheme) — always same-origin.
+/// - Relative [url] (no scheme, no authority) — always same-origin.
+/// - Scheme-relative [url] (`//host/...`) — always cross-origin: the host is
+///   chosen by whoever built the URL, so the CSRF token is never attached
+///   (issue #31).
 /// - Absolute [url] + absolute [apiPrefix] — compare scheme, host and port.
 /// - Absolute [url] + relative [apiPrefix] — compare against [windowOrigin].
 ///
@@ -34,8 +37,13 @@ bool isSameOriginPure(String url, String apiPrefix, String windowOrigin) {
     final parsedUrl = Uri.tryParse(url);
     if (parsedUrl == null) return false;
 
-    // Relative URL — same origin by definition.
-    if (!parsedUrl.hasScheme) return true;
+    if (!parsedUrl.hasScheme) {
+      // Scheme-relative URL (`//host/path`): the browser would send it to
+      // `host`, so treat it as cross-origin (issue #31).
+      if (parsedUrl.hasAuthority) return false;
+      // Relative URL (path only) — same origin by definition.
+      return true;
+    }
 
     if (apiPrefix.startsWith('http://') || apiPrefix.startsWith('https://')) {
       final parsedPrefix = Uri.tryParse(apiPrefix);

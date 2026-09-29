@@ -158,5 +158,34 @@ void main() {
         isFalse,
       );
     });
+
+    test('scheme-relative URL with relative prefix → false (issue #31)', () {
+      expect(
+        isSameOriginPure('//evil.com/x', '/api/auth', 'https://ita.app'),
+        isFalse,
+      );
+    });
+
+    test('scheme-relative URL with absolute prefix → false (issue #31)', () {
+      expect(
+        isSameOriginPure(
+            '//evil.com/x', 'https://ita.app/api/auth', 'https://ita.app'),
+        isFalse,
+      );
+    });
+
+    test('scheme-relative URL to the same host → false (issue #31)', () {
+      expect(
+        isSameOriginPure('//ita.app/x', '/api/auth', 'https://ita.app'),
+        isFalse,
+      );
+    });
+
+    test('backslash form /\\evil.com → false (issue #31)', () {
+      expect(
+        isSameOriginPure('/\\evil.com/x', '/api/auth', 'https://ita.app'),
+        isFalse,
+      );
+    });
   });
 }

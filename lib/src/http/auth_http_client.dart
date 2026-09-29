@@ -61,6 +61,9 @@ class AuthHttpClient extends http.BaseClient {
   /// In-flight refresh deduplicator.
   Completer<bool>? _refreshCompleter;
 
+  /// In-flight token-storage clear (see [waitForTokenClear]).
+  Future<void>? _pendingTokenClear;
+
   AuthHttpClient({
     required http.Client inner,
     required String apiPrefix,
@@ -85,43 +88,78 @@ class AuthHttpClient extends http.BaseClient {
     _refreshToken = null;
   }
 
+  /// Registers an in-flight clear of the persisted tokens.
+  ///
+  /// Every request built after this call waits for [clearing] to complete
+  /// before reading the Bearer token, so a request issued right after an
+  /// un-awaited `clearLocalSession()` never carries the old
+  /// `Authorization` header, even with an asynchronous [TokenStorage]
+  /// (issue #31).
+  void waitForTokenClear(Future<void> clearing) {
+    _pendingTokenClear = clearing;
+    clearing.then((_) {}, onError: (_) {}).whenComplete(() {
+      if (identical(_pendingTokenClear, clearing)) _pendingTokenClear = null;
+    });
+  }
+
   // -------------------------------------------------------------------------
   // URL helpers
   // -------------------------------------------------------------------------
 
+  static bool _isHttpUrl(Uri uri) =>
+      uri.scheme == 'http' || uri.scheme == 'https';
+
+  /// Returns `true` for a scheme-relative URI (`//host/path`): no scheme but
+  /// an authority, so the host is chosen by the URI itself.
+  static bool isSchemeRelative(Uri uri) => !uri.hasScheme && uri.hasAuthority;
+
+  /// Resolves [path] against the API prefix.
+  ///
+  /// - `http(s)://...` URLs are used as-is.
+  /// - Scheme-relative paths (`//host/...`, including `/\host`, which
+  ///   `Uri.parse` normalises to `//host`) are rejected with an
+  ///   [ArgumentError]: they would leave the prefix origin (issue #31).
+  /// - [isAbsolute] (root-relative `/x`): the path replaces the prefix path,
+  ///   keeping the prefix origin when the prefix is absolute.
+  /// - Otherwise the prefix path segments and the endpoint path segments are
+  ///   joined, with the same result for absolute and relative prefixes.
+  ///
+  /// Segments are decoded by [Uri.pathSegments] and re-encoded by the [Uri]
+  /// constructor, so an interpolated segment encoded with
+  /// [Uri.encodeComponent] (containing `?`, `#` or `/`) stays one segment.
   Uri _buildUri(String path, {bool isAbsolute = false}) {
-    if (path.startsWith('http://') || path.startsWith('https://')) {
-      return Uri.parse(path);
-    }
     final parsed = Uri.parse(path);
+    if (parsed.hasScheme) {
+      if (_isHttpUrl(parsed)) return parsed;
+      throw ArgumentError.value(
+          path, 'path', 'Only http and https absolute URLs are supported');
+    }
+    if (parsed.hasAuthority) {
+      throw ArgumentError.value(
+          path, 'path', 'Scheme-relative paths (//host/...) are not allowed');
+    }
+
+    final prefix = Uri.parse(_apiPrefix);
+    final query = parsed.hasQuery ? parsed.query : null;
+
+    final List<String> segments;
     if (isAbsolute) {
-      if (_apiPrefix.startsWith('http://') || _apiPrefix.startsWith('https://')) {
-        final base = Uri.parse(_apiPrefix);
-        return base.replace(
-          path: parsed.path,
-          query: parsed.hasQuery ? parsed.query : null,
-        );
+      segments = parsed.pathSegments;
+    } else {
+      final prefixSegments = [...prefix.pathSegments];
+      while (prefixSegments.isNotEmpty && prefixSegments.last.isEmpty) {
+        prefixSegments.removeLast();
       }
-      return parsed;
+      segments = [...prefixSegments, ...parsed.pathSegments];
     }
-    final prefix = _apiPrefix.endsWith('/')
-        ? _apiPrefix.substring(0, _apiPrefix.length - 1)
-        : _apiPrefix;
-    final normalizedPath =
-        parsed.path.startsWith('/') ? parsed.path : '/${parsed.path}';
-    final fullUrl = '$prefix$normalizedPath';
-    if (_apiPrefix.startsWith('http://') || _apiPrefix.startsWith('https://')) {
-      final base = Uri.parse(prefix);
-      return base.replace(
-        path: normalizedPath.startsWith(base.path)
-            ? normalizedPath
-            : '${base.path}$normalizedPath'.replaceAll('//', '/'),
-        query: parsed.hasQuery ? parsed.query : null,
-      );
+
+    if (_isHttpUrl(prefix)) {
+      return prefix.replace(pathSegments: segments, query: query);
     }
+    final rooted = isAbsolute || prefix.path.isEmpty || prefix.path.startsWith('/');
     return Uri(
-      path: fullUrl,
-      query: parsed.hasQuery ? parsed.query : null,
+      pathSegments: rooted ? ['', ...segments] : segments,
+      query: query,
     );
   }
 
@@ -148,11 +186,13 @@ class AuthHttpClient extends http.BaseClient {
   // Header helpers
   // -------------------------------------------------------------------------
 
+  /// Builds the request headers for a request that will be sent to exactly
+  /// [target]. The CSRF decision is taken on [target] itself, never on a
+  /// rebuilt URI, and is skipped for scheme-relative targets (issue #31).
   Future<Map<String, String>> _buildHeaders(
-    String path,
+    Uri target,
     Map<String, String>? extra, {
     bool includeAuthHeaders = true,
-    bool isAbsolute = false,
   }) async {
     final headers = <String, String>{
       'Content-Type': 'application/json',
@@ -161,14 +201,23 @@ class AuthHttpClient extends http.BaseClient {
     };
 
     if (includeAuthHeaders) {
-      final url = _buildUri(path, isAbsolute: isAbsolute).toString();
-      final csrf = _csrfProvider?.call(url);
-      if (csrf != null) headers['X-CSRF-Token'] = csrf;
+      if (!isSchemeRelative(target)) {
+        final csrf = _csrfProvider?.call(target.toString());
+        if (csrf != null) headers['X-CSRF-Token'] = csrf;
+      }
 
       if (_bearerProvider != null) {
         // Interop contract with awesome-node-auth: native clients opt into
         // token-in-body delivery via X-Auth-Strategy=bearer.
         headers['X-Auth-Strategy'] = 'bearer';
+        final pending = _pendingTokenClear;
+        if (pending != null) {
+          try {
+            await pending;
+          } catch (_) {
+            // The error is reported to the caller of clearLocalSession().
+          }
+        }
         final bearer = await _bearerProvider();
         if (bearer != null) headers['Authorization'] = 'Bearer $bearer';
       }
@@ -227,7 +276,7 @@ class AuthHttpClient extends http.BaseClient {
     bool isAbsolute = false,
   }) async {
     final allHeaders =
-        await _buildHeaders(path, headers, isAbsolute: isAbsolute);
+        await _buildHeaders(_buildUri(path, isAbsolute: isAbsolute), headers);
     final response = await _rawSend(
       method,
       path,
@@ -341,7 +390,7 @@ class AuthHttpClient extends http.BaseClient {
     final refreshed = await _doRefresh();
     if (refreshed) {
       final retryHeaders =
-          await _buildHeaders(path, headers, isAbsolute: isAbsolute);
+          await _buildHeaders(_buildUri(path, isAbsolute: isAbsolute), headers);
       return _rawSend(method, path, retryHeaders, body, queryParameters,
           isAbsolute: isAbsolute);
     } else {
@@ -379,7 +428,7 @@ class AuthHttpClient extends http.BaseClient {
   /// Calls `POST $apiPrefix/refresh` directly, bypassing retry logic.
   Future<bool> callRefreshEndpoint() async {
     try {
-      final headers = await _buildHeaders('/refresh', null);
+      final headers = await _buildHeaders(_buildUri('/refresh'), null);
       // On web: _bearerProvider is null — the refresh token is an HttpOnly cookie
       // managed by the browser. No body is sent; the cookie is included automatically.
       // On native: _bearerProvider is set, _refreshToken is populated from the login
@@ -411,7 +460,8 @@ class AuthHttpClient extends http.BaseClient {
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     // Inject auth headers before the request is finalised inside _inner.send().
-    final authHeaders = await _buildHeaders(request.url.toString(), null);
+    // The CSRF decision uses request.url exactly as it will be sent.
+    final authHeaders = await _buildHeaders(request.url, null);
     request.headers.addAll(authHeaders);
 
     // Materialise the response so we can inspect the status code and body.
@@ -430,7 +480,7 @@ class AuthHttpClient extends http.BaseClient {
       final refreshed = await _doRefresh();
       if (refreshed) {
         final retry = _cloneRequest(request);
-        final retryHeaders = await _buildHeaders(request.url.toString(), null);
+        final retryHeaders = await _buildHeaders(request.url, null);
         retry.headers.addAll(retryHeaders);
         final retryStreamed = await _inner.send(retry);
         final retryResponse = await http.Response.fromStream(retryStreamed);

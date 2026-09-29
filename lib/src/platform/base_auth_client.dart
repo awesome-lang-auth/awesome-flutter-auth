@@ -126,6 +126,9 @@ abstract class BaseAuthClient implements AuthClient {
     return null;
   }
 
+  static List<String> _stringList(Object? raw) =>
+      raw is List ? raw.whereType<String>().toList() : const <String>[];
+
   AuthResult<T> _failure<T>(http.Response response) => AuthResult<T>.failure(
         _errorMessage(response),
         errorCode: _errorCode(response),
@@ -193,7 +196,8 @@ abstract class BaseAuthClient implements AuthClient {
 
   @override
   Future<AuthResult<void>> revokeSession(String sessionHandle) async {
-    final response = await httpClient.apiDelete('/sessions/$sessionHandle');
+    final response = await httpClient
+        .apiDelete('/sessions/${Uri.encodeComponent(sessionHandle)}');
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return AuthResult.success();
     }
@@ -227,10 +231,9 @@ abstract class BaseAuthClient implements AuthClient {
         final rawTempToken = data['tempToken'];
         return LoginResult.requires2FA(
           tempToken: rawTempToken is String ? rawTempToken : '',
-          availableMethods:
-              (data['available2faMethods'] as List<dynamic>?)?.cast<String>() ??
-                  [],
-          requires2FASetup: data['requires2FASetup'] as bool? ?? false,
+          // Validated eagerly: non-string entries are dropped (issue #31).
+          availableMethods: _stringList(data['available2faMethods']),
+          requires2FASetup: data['requires2FASetup'] == true,
         );
       }
 
@@ -631,8 +634,9 @@ abstract class BaseAuthClient implements AuthClient {
   @override
   Future<AuthResult<void>> unlinkAccount(
       String provider, String providerAccountId) async {
-    final response = await httpClient
-        .apiDelete('/linked-accounts/$provider/$providerAccountId');
+    final response = await httpClient.apiDelete(
+        '/linked-accounts/${Uri.encodeComponent(provider)}/'
+        '${Uri.encodeComponent(providerAccountId)}');
     if (response.statusCode >= 200 && response.statusCode < 300) {
       await checkSession();
       return AuthResult.success();
@@ -644,8 +648,11 @@ abstract class BaseAuthClient implements AuthClient {
   // Account management
   // -------------------------------------------------------------------------
 
+  /// Resets user and in-memory tokens synchronously and emits
+  /// [AuthEventType.loggedOut]; the returned future completes once the
+  /// platform-specific cleanup (the token storage on native) is done.
   @override
-  void clearLocalSession() {
+  Future<void> clearLocalSession() async {
     httpClient.clearTokens();
     _state.setUser(null);
     _eventsController.add(const AuthEvent(type: AuthEventType.loggedOut));
@@ -653,12 +660,30 @@ abstract class BaseAuthClient implements AuthClient {
 
   @override
   Future<AuthResult<void>> deleteAccount({String? path}) async {
-    final customPath = path ?? options.deleteAccountPath;
+    // An empty or blank path means "not set" (issue #31).
+    String? nonBlank(String? p) => (p == null || p.trim().isEmpty) ? null : p;
+    final customPath = nonBlank(path) ?? nonBlank(options.deleteAccountPath);
     final http.Response response;
     if (customPath != null) {
-      final isAbsolute = customPath.startsWith('/') ||
-          customPath.startsWith('http://') ||
-          customPath.startsWith('https://');
+      final Uri parsed;
+      try {
+        parsed = Uri.parse(customPath);
+      } on FormatException {
+        return AuthResult<void>.failure('Invalid deleteAccount path',
+            errorCode: 'INVALID_PATH');
+      }
+      // Scheme-relative paths (`//host/x`, and `/\host/x`, which Uri.parse
+      // normalises to `//host/x`) would leave the prefix origin and carry the
+      // CSRF token to another host: reject them without sending (issue #31).
+      // Only http(s) absolute URLs are accepted.
+      if ((!parsed.hasScheme && parsed.hasAuthority) ||
+          (parsed.hasScheme &&
+              parsed.scheme != 'http' &&
+              parsed.scheme != 'https')) {
+        return AuthResult<void>.failure('Invalid deleteAccount path',
+            errorCode: 'INVALID_PATH');
+      }
+      final isAbsolute = parsed.hasScheme || parsed.path.startsWith('/');
       response = await httpClient.apiDelete(customPath, isAbsolute: isAbsolute);
     } else {
       response = await httpClient.apiDelete('/account');
@@ -692,7 +717,8 @@ abstract class BaseAuthClient implements AuthClient {
   // -------------------------------------------------------------------------
 
   @override
-  String getOAuthUrl(String provider) => '${options.apiPrefix}/oauth/$provider';
+  String getOAuthUrl(String provider) =>
+      '${options.apiPrefix}/oauth/${Uri.encodeComponent(provider)}';
 
   @override
   Future<AuthUser?> handleOAuthCallback() async {
