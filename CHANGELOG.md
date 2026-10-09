@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 1.10.6
+
+### Fixed
+
+- **`OfflineTokenVerifier` works under dart2wasm** ([#34](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/34)):
+  - Under `flutter build web --wasm` every token was rejected with `signature_invalid: Ed25519 verification internal error`.
+  - The cause was `ed25519_edwards`. It does its arithmetic through `adaptive_number`, whose conditional import has no dart2wasm branch, so every operation threw `UnsupportedError`.
+  - Ed25519 verification now uses the TweetNaCl arithmetic of `pinenacl`. It is pure Dart and synchronous, and it gives the same result on the VM, dart2js and dart2wasm.
+  - The public API and the order of the checks are unchanged.
+
+### Changed
+
+- **Dependency:** `ed25519_edwards` is replaced by `pinenacl` ^0.6.0, which has no dependencies. This drops five packages from the dependency graph: `ed25519_edwards`, `adaptive_number`, `fixnum`, `convert` and `crypto`.
+
+### Tests
+
+- Added the RFC 8032 section 7.1 Ed25519 vectors.
+- Added the licence token vectors, with the outcome recorded on the VM before the change: valid, next-kid, expired, wrong-alg, wrong-aud, tampered, tier-*, next-tier-* and trial-premium.
+- Added negative cases: wrong key, tampered payload, a flipped bit in R or S, and non-canonical S.
+- All of these run on the VM, on Chrome with dart2js and on Chrome with dart2wasm.
+- CI has a `web` job that runs the suite on Chrome with dart2wasm, and the offline token tests with dart2js.
+
 ## 1.10.5
 
 ### Security
