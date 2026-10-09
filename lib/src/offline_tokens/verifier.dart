@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:ed25519_edwards/ed25519_edwards.dart' as ed;
 
+import 'ed25519.dart';
 import 'models.dart';
 
 /// The group order L of Ed25519 in little-endian 32 bytes (RFC 8032).
@@ -252,8 +252,8 @@ class OfflineTokenVerifier {
     final signedMessage = ascii.encode('$headerPart.$payloadPart');
     final bool isSigValid;
     try {
-      isSigValid = ed.verify(
-        ed.PublicKey(key.publicKeyBytes),
+      isSigValid = ed25519Verify(
+        key.publicKeyBytes,
         Uint8List.fromList(signedMessage),
         sigBytes,
       );

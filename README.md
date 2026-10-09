@@ -979,6 +979,8 @@ Verify JWS compact tokens signed with `alg: EdDSA` (Ed25519) offline without con
 
 Implemented in **pure Dart** without dependencies on Flutter SDK, `dart:io` or `dart:html`: works on Flutter mobile/desktop/web (including WASM) as well as standalone Dart CLI, servers, and tests.
 
+The Ed25519 check uses the TweetNaCl arithmetic of [`pinenacl`](https://pub.dev/packages/pinenacl). It is synchronous and gives the same result on the Dart VM, dart2js (`flutter build web`) and dart2wasm (`flutter build web --wasm`). The test suite runs the RFC 8032 vectors and the token vectors under all three compilers.
+
 ```dart
 import 'package:awesome_flutter_auth/offline_tokens.dart';
 
