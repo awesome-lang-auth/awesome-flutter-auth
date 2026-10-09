@@ -16,15 +16,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Dependency:** `ed25519_edwards` is replaced by `pinenacl` ^0.6.0, which has no dependencies. This drops five packages from the dependency graph: `ed25519_edwards`, `adaptive_number`, `fixnum`, `convert` and `crypto`.
+- **New direct dependency: `pinenacl` ^0.6.0**, which replaces `ed25519_edwards`. `pinenacl` has no dependencies, so this drops five packages from the dependency graph: `ed25519_edwards`, `adaptive_number`, `fixnum`, `convert` and `crypto`.
+  - An app or package that already depends on `pinenacl` below 0.6 gets a version-solving conflict with this release.
 
 ### Tests
 
 - Added the RFC 8032 section 7.1 Ed25519 vectors.
 - Added the licence token vectors, with the outcome recorded on the VM before the change: valid, next-kid, expired, wrong-alg, wrong-aud, tampered, tier-*, next-tier-* and trial-premium.
-- Added negative cases: wrong key, tampered payload, a flipped bit in R or S, and non-canonical S.
+- Added negative cases: wrong key, tampered payload, a flipped bit in R or S, and non-canonical S (S + L on the tokens; S + L and S = L on the Ed25519 check itself).
 - All of these run on the VM, on Chrome with dart2js and on Chrome with dart2wasm.
-- CI has a `web` job that runs the suite on Chrome with dart2wasm, and the offline token tests with dart2js.
+- CI has a `web` job that runs the suite on Chrome with dart2wasm, and the offline token tests with dart2js (the rest of the suite has a known dart2js-only test failure in `test/auth_client_test.dart`, unrelated to this change).
 
 ## 1.10.5
 

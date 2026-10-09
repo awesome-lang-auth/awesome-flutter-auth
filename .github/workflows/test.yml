@@ -37,7 +37,9 @@ jobs:
   web:
     # Browser runs of the pure-Dart suite (issue #34). dart2wasm runs the whole
     # suite. dart2js runs the offline token tests only, because
-    # test/auth_client_test.dart has a dart2js-only failure unrelated to them.
+    # test/auth_client_test.dart has a dart2js-only failure unrelated to them:
+    # "userStream emits user on login and null on logout" (issue: TBD).
+    # Run the whole suite on dart2js again (tests: "") once that is fixed.
     name: Web tests (${{ matrix.compiler }})
     runs-on: ubuntu-latest
     strategy:
