@@ -4,15 +4,6 @@ import 'dart:typed_data';
 import 'ed25519.dart';
 import 'models.dart';
 
-/// The group order L of Ed25519 in little-endian 32 bytes (RFC 8032).
-/// L = 2^252 + 27742317777372353535851937790883648493
-const _ed25519OrderL = <int>[
-  0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
-  0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
-];
-
 /// Offline token verifier for JWS compact tokens signed with EdDSA (Ed25519).
 class OfflineTokenVerifier {
   /// The set of trusted public keys indexed by `kid`.
@@ -240,8 +231,10 @@ class OfflineTokenVerifier {
       );
     }
 
-    // Canonical encoding: S < L, high bit of last byte clear
-    if (!_isScalarCanonical(sigBytes.sublist(32, 64))) {
+    // Canonical encoding: S < L (which also means the high bit is clear).
+    // ed25519Verify checks this too; checking it here gives the specific
+    // error message.
+    if (!isCanonicalEd25519Scalar(sigBytes.sublist(32, 64))) {
       return const OfflineTokenVerificationResult.invalid(
         OfflineTokenReason.signatureInvalid,
         'Signature S scalar is non-canonical (must be < L with high bit clear)',
@@ -366,23 +359,6 @@ class OfflineTokenVerifier {
       OfflineTokenResult(header: header, claims: payload),
     );
   }
-}
-
-/// Checks that a 32-byte scalar [s] is in canonical form: S < L and high bit is clear.
-bool _isScalarCanonical(Uint8List s) {
-  if (s.length != 32) return false;
-  // High bit of last byte (s[31]) must be clear
-  if ((s[31] & 0x80) != 0) return false;
-
-  // Compare s with L from most significant byte down to least significant
-  for (var i = 31; i >= 0; i--) {
-    final sByte = s[i];
-    final lByte = _ed25519OrderL[i];
-    if (sByte < lByte) return true;
-    if (sByte > lByte) return false;
-  }
-  // If equal to L, it is not strictly less than L
-  return false;
 }
 
 Uint8List? _decodeBase64Url(String input) {
