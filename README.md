@@ -971,6 +971,12 @@ import 'platform/native_auth_client.dart'
 flutter build web --wasm
 ```
 
+A successful build is not enough: code can compile to WebAssembly and still fail at runtime ([#34](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/34) built fine and rejected every token). Run the test suite in Chrome compiled to WebAssembly too, as CI does:
+
+```bash
+dart test -p chrome -c dart2wasm
+```
+
 ---
 
 ## Offline token verification
@@ -978,6 +984,8 @@ flutter build web --wasm
 Verify JWS compact tokens signed with `alg: EdDSA` (Ed25519) offline without contacting the server, such as for standalone licence validation, desktop apps, or PWAs.
 
 Implemented in **pure Dart** without dependencies on Flutter SDK, `dart:io` or `dart:html`: works on Flutter mobile/desktop/web (including WASM) as well as standalone Dart CLI, servers, and tests.
+
+The Ed25519 check uses the TweetNaCl arithmetic of [`pinenacl`](https://pub.dev/packages/pinenacl). It is synchronous and gives the same result on the Dart VM, dart2js (`flutter build web`) and dart2wasm (`flutter build web --wasm`). The test suite runs the RFC 8032 vectors and the token vectors under all three compilers. The check is cofactorless and rejects a non-canonical `S` (`S >= L`); it does not claim strict RFC 8032 / ZIP-215 handling of small-order or non-canonically encoded points, so the public keys must come from a key set you trust.
 
 ```dart
 import 'package:awesome_flutter_auth/offline_tokens.dart';
