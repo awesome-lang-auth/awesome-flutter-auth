@@ -800,15 +800,29 @@ The client transparently handles token expiry so individual API calls do not nee
 2. If eligible for retry, the client calls `POST $apiPrefix/refresh`.
 3. On success (native) the new `accessToken` from the response body is written back to `TokenStorage`. On web the browser updates the cookie automatically.
 4. The original request is retried with the new token.
-5. If the refresh also fails, the session is considered expired and `handleLogout()` is called.
+5. If the refresh also fails, the session is considered expired and `handleLogout()` is called, unless the session already ended meanwhile (see below).
+
+On web the refresh is sent even when the csrf cookie is gone, without `X-CSRF-Token`. The csrf cookie expires with the access token while the refresh cookie lives on, so after an idle period this is how the session resumes. `/refresh` is CSRF-exempt on the servers.
 
 ### Concurrent refresh deduplication
 
-If multiple requests fail at the same time, only **one** refresh call is made. All concurrent requests wait for that single call to complete before retrying. This prevents the `POST /refresh` endpoint from being hammered.
+If multiple requests fail at the same time, only **one** refresh call is made. All concurrent requests wait for that single call to complete before retrying. This prevents the `POST /refresh` endpoint from being hammered. If that refresh fails, `loggedOut` is emitted once, not once per request.
 
 ### Session revoked
 
 When the backend responds with `{ "code": "SESSION_REVOKED" }`, the client skips the refresh attempt and immediately calls `handleLogout(revoked: true)`, which emits `AuthEventType.sessionRevoked`.
+
+### Late 401/403 after the session ended
+
+`logout()`, `clearLocalSession()`, a successful `deleteAccount()` and a failed refresh end the session locally. From then on, until the next successful `GET /me` (every login flow ends with one, as does `checkSession()`):
+
+- A 401/403 is returned to the caller unchanged: no refresh, no retry, no `loggedOut` or `sessionRevoked` event. This covers requests that were in flight when the session ended and requests started afterwards (route guards, polling, `checkSession()`).
+- A refresh that was in flight when the session ended has its result dropped: on native no token is written to `TokenStorage` or kept in memory, and the original request is not retried.
+- A request of the ended session whose 401 arrives after a new login also gets the raw 401: it was sent with the old credentials.
+
+`logout()` waits for a refresh in flight before it sends `POST /logout`, so the server revokes the refreshed session. On web this matters because the browser stores the cookies of the refresh response itself. `clearLocalSession()` is local and does not wait: on web the cookies of a refresh in flight can still be stored after it, as any server cookie can after a local-only clear.
+
+On native `logout()` sends the current refresh token in the body of `POST /logout` (`{"refreshToken": "..."}`), so the server can revoke the session even when the access token has expired. Cookie mode sends no body.
 
 ### Endpoints excluded from auto-retry
 
@@ -831,7 +845,7 @@ The following endpoints always receive the raw response — they are never retri
 | | Web | Native |
 |---|---|---|
 | Token location | HttpOnly cookie | `TokenStorage` |
-| Refresh request body | Empty (browser sends the HttpOnly cookie automatically) | Empty body; `Authorization: Bearer <accessToken>` header is sent so the backend can identify the session |
+| Refresh request body | Empty (browser sends the HttpOnly cookie automatically) | `{"refreshToken": "..."}` from the last login or refresh response, with `X-Auth-Strategy: bearer` and `Authorization: Bearer <accessToken>` |
 | New token delivery | Cookie set by server | `accessToken` field in JSON response body |
 
 ---

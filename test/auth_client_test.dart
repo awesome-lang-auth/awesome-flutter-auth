@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:test/test.dart';
@@ -13,9 +14,19 @@ import 'package:awesome_flutter_auth/src/auth_options.dart';
 import 'package:awesome_flutter_auth/src/auth_user.dart';
 import 'package:awesome_flutter_auth/src/models/auth_result.dart';
 import 'package:awesome_flutter_auth/src/models/session_info.dart';
+import 'package:awesome_flutter_auth/src/platform/base_auth_client.dart';
 import 'package:awesome_flutter_auth/src/platform/native_auth_client.dart';
 
 class MockHttpClient extends Mock implements http.Client {}
+
+/// Cookie-mode client like `WebAuthClient` (which needs a browser): the base
+/// logout handling, no token storage.
+class CookieAuthClient extends BaseAuthClient {
+  CookieAuthClient(super.options, super.httpClient);
+
+  @override
+  Stream<String> getToolsStream() => const Stream.empty();
+}
 
 /// [TokenStorage] whose [clear] completes after a delay, like a secure
 /// storage plugin (issue #31).
@@ -1392,6 +1403,449 @@ void main() {
     test('getOAuthUrl encodes the provider segment', () {
       expect(authClient.getOAuthUrl('a/b?c'),
           equals('https://api.example.com/auth/oauth/a%2Fb%3Fc'));
+    });
+  });
+
+  group('AuthClient — Issue #33: late 401/403 after the session ended', () {
+    const windowOrigin = 'https://ita.app';
+    const prefix = '/api/auth';
+    final noAccessToken = jsonResponse(403, {'error': 'No access token provided'});
+
+    late List<http.Request> sent;
+    late Completer<http.Response> pending;
+    late List<AuthEventType> events;
+    late InMemoryTokenStorage storage;
+
+    /// The csrf cookie as seen by `document.cookie`; the server clears it on
+    /// logout and account deletion and sets it again on login.
+    String? csrfCookie;
+
+    /// Whether the server still holds a live session: cleared by `/logout`
+    /// and `DELETE /account`, set by `/login`. `/refresh` and `/me` fail
+    /// without one, as on the real servers.
+    late bool sessionAlive;
+
+    /// When set, the next `POST /refresh` waits for it (one shot).
+    Completer<http.Response>? refreshGate;
+
+    /// Recording server: `/data` waits for [pending].
+    http.Client server() {
+      return http_testing.MockClient((r) async {
+        sent.add(r);
+        final path = r.url.path;
+        if (path.endsWith('/data')) return pending.future;
+        if (path.endsWith('/logout') || r.method == 'DELETE') {
+          csrfCookie = null;
+          sessionAlive = false;
+          return jsonResponse(200, {'success': true});
+        }
+        if (path.endsWith('/refresh')) {
+          final gate = refreshGate;
+          if (gate != null) {
+            refreshGate = null;
+            return gate.future;
+          }
+          if (!sessionAlive) {
+            return jsonResponse(401, {'error': 'No refresh token provided'});
+          }
+          return jsonResponse(
+              200, {'accessToken': 'AT-R', 'refreshToken': 'RT-R'});
+        }
+        if (path.endsWith('/login')) {
+          sessionAlive = true;
+          csrfCookie = 'CSRF2';
+          return jsonResponse(
+              200, {'accessToken': 'AT-L', 'refreshToken': 'RT-L'});
+        }
+        if (path.endsWith('/me')) {
+          return sessionAlive
+              ? jsonResponse(200, _testUser)
+              : jsonResponse(401, {'error': 'Unauthorized'});
+        }
+        return jsonResponse(200, _testUser);
+      });
+    }
+
+    /// Cookie mode, as wired by the web factory: CSRF header from the cookie
+    /// for same-origin URLs, no Bearer token.
+    BaseAuthClient buildCookieClient() {
+      final authHttp = AuthHttpClient(
+        inner: server(),
+        apiPrefix: prefix,
+        csrfProvider: (url) =>
+            isSameOriginPure(url, prefix, windowOrigin) ? csrfCookie : null,
+      );
+      return CookieAuthClient(
+        const AuthOptions(
+            apiPrefix: prefix, headless: true, initializeOnStartup: false),
+        authHttp,
+      );
+    }
+
+    BaseAuthClient buildNativeClient(
+        {Future<String?> Function()? bearerProvider}) {
+      storage.writeAccessToken('AT1');
+      final authHttp = AuthHttpClient(
+        inner: server(),
+        apiPrefix: prefix,
+        bearerProvider: bearerProvider ?? storage.readAccessToken,
+        bearerSetter: storage.writeAccessToken,
+      );
+      return NativeAuthClient(
+        const AuthOptions(
+            apiPrefix: prefix, headless: true, initializeOnStartup: false),
+        authHttp,
+        storage,
+      );
+    }
+
+    setUp(() {
+      sent = [];
+      pending = Completer<http.Response>();
+      events = [];
+      storage = InMemoryTokenStorage();
+      csrfCookie = 'CSRF1';
+      sessionAlive = true;
+      refreshGate = null;
+    });
+
+    Iterable<http.Request> refreshes() =>
+        sent.where((r) => r.url.path.endsWith('/refresh'));
+    Iterable<http.Request> dataRequests() =>
+        sent.where((r) => r.url.path.endsWith('/data'));
+    http.Request logoutRequest() =>
+        sent.singleWhere((r) => r.url.path.endsWith('/logout'));
+
+    final endings = <String, Future<void> Function(BaseAuthClient)>{
+      'logout()': (c) => c.logout(),
+      'clearLocalSession()': (c) => c.clearLocalSession(),
+      'deleteAccount()': (c) => c.deleteAccount(),
+    };
+
+    final builders = <String, BaseAuthClient Function()>{
+      'cookie mode': buildCookieClient,
+      'native': buildNativeClient,
+    };
+
+    builders.forEach((mode, build) {
+      endings.forEach((name, end) {
+        test(
+            '$mode: apiGet in flight, $name, 403 "No access token provided" '
+            '-> no refresh, original error returned', () async {
+          final client = build();
+          final sub = client.events.listen((e) => events.add(e.type));
+
+          final request = client.httpClient.apiGet('/data');
+          await pumpEventQueue();
+          await end(client);
+          pending.complete(noAccessToken);
+          final response = await request;
+          await pumpEventQueue();
+          await sub.cancel();
+
+          expect(refreshes(), isEmpty);
+          expect(response.statusCode, equals(403));
+          expect(response.body, equals(noAccessToken.body));
+          // Only the logout of [end]: the late 403 adds no second one (before
+          // the fix the refresh failed and emitted it).
+          expect(events, equals([AuthEventType.loggedOut]));
+          expect(dataRequests(), hasLength(1));
+        });
+
+        test(
+            '$mode: httpClient.get in flight, $name, 403 -> no refresh, '
+            'original error returned', () async {
+          final client = build();
+          final sub = client.events.listen((e) => events.add(e.type));
+
+          final request =
+              client.httpClient.get(Uri.parse('https://ita.app/app/data'));
+          await pumpEventQueue();
+          await end(client);
+          pending.complete(noAccessToken);
+          final response = await request;
+          await pumpEventQueue();
+          await sub.cancel();
+
+          expect(refreshes(), isEmpty);
+          expect(response.statusCode, equals(403));
+          expect(response.body, equals(noAccessToken.body));
+          expect(events, equals([AuthEventType.loggedOut]));
+        });
+      });
+    });
+
+    test(
+        'cookie mode: no POST /refresh without X-CSRF-Token is sent when the '
+        'csrf cookie is cleared by logout', () async {
+      final client = buildCookieClient();
+
+      final viaApi = client.httpClient.apiGet('/data');
+      final viaSend =
+          client.httpClient.post(Uri.parse('https://ita.app/app/data'));
+      await pumpEventQueue();
+      await client.logout();
+      expect(csrfCookie, isNull);
+      pending.complete(jsonResponse(401));
+      await Future.wait([viaApi, viaSend]);
+
+      expect(refreshes(), isEmpty);
+      // /logout itself still carried the token: the cookie was there.
+      expect(logoutRequest().headers['X-CSRF-Token'], equals('CSRF1'));
+      final unsafeWithoutCsrf = sent.where((r) =>
+          r.method != 'GET' && !r.headers.containsKey('X-CSRF-Token'));
+      expect(unsafeWithoutCsrf, isEmpty);
+    });
+
+    test('session ended while the refresh is in flight -> no retry', () async {
+      final refresh = Completer<bool>();
+      final client = buildCookieClient();
+      client.httpClient.setRefreshHandler(() => refresh.future);
+      final sub = client.events.listen((e) => events.add(e.type));
+
+      pending.complete(jsonResponse(401));
+      final request = client.httpClient.apiGet('/data');
+      await pumpEventQueue();
+      await client.clearLocalSession();
+      refresh.complete(true);
+      final response = await request;
+      await pumpEventQueue();
+      await sub.cancel();
+
+      expect(response.statusCode, equals(401));
+      expect(dataRequests(), hasLength(1));
+      expect(events, equals([AuthEventType.loggedOut]));
+    });
+
+    test(
+        'native: refresh in flight across clearLocalSession() -> its tokens '
+        'are not written back', () async {
+      final gate = refreshGate = Completer<http.Response>();
+      final client = buildNativeClient();
+
+      pending.complete(jsonResponse(401));
+      final request = client.httpClient.apiGet('/data');
+      await pumpEventQueue();
+      expect(refreshes(), hasLength(1));
+
+      await client.clearLocalSession();
+      gate.complete(
+          jsonResponse(200, {'accessToken': 'AT2', 'refreshToken': 'RT2'}));
+      final response = await request;
+
+      expect(response.statusCode, equals(401));
+      expect(await storage.readAccessToken(), isNull);
+      // No refresh token kept in memory either.
+      expect(client.httpClient.logoutBody, isNull);
+      await client.httpClient.apiGet('/profile');
+      expect(sent.last.url.path, endsWith('/profile'));
+      expect(sent.last.headers.containsKey('Authorization'), isFalse);
+    });
+
+    test(
+        'native: logout() waits for the refresh in flight, revokes the '
+        'refreshed session and leaves no token behind', () async {
+      final gate = refreshGate = Completer<http.Response>();
+      final client = buildNativeClient();
+      final sub = client.events.listen((e) => events.add(e.type));
+
+      pending.complete(jsonResponse(401));
+      final request = client.httpClient.apiGet('/data');
+      await pumpEventQueue();
+      final loggingOut = client.logout();
+      await pumpEventQueue();
+      // POST /logout waits for the refresh.
+      expect(sent.where((r) => r.url.path.endsWith('/logout')), isEmpty);
+
+      // The server processed the refresh before the logout.
+      gate.complete(
+          jsonResponse(200, {'accessToken': 'AT2', 'refreshToken': 'RT2'}));
+      await loggingOut;
+      await request;
+      await pumpEventQueue();
+      await sub.cancel();
+
+      final logout = logoutRequest();
+      expect(jsonDecode(logout.body), equals({'refreshToken': 'RT2'}));
+      expect(logout.headers['Authorization'], equals('Bearer AT2'));
+      expect(await storage.readAccessToken(), isNull);
+      expect(client.httpClient.logoutBody, isNull);
+      expect(events, equals([AuthEventType.loggedOut]));
+    });
+
+    test(
+        'cookie mode: logout() waits for the refresh in flight before POST '
+        '/logout', () async {
+      final gate = refreshGate = Completer<http.Response>();
+      final client = buildCookieClient();
+
+      pending.complete(jsonResponse(401));
+      final request = client.httpClient.apiGet('/data');
+      await pumpEventQueue();
+      final loggingOut = client.logout();
+      await pumpEventQueue();
+      expect(sent.where((r) => r.url.path.endsWith('/logout')), isEmpty);
+
+      gate.complete(jsonResponse(200));
+      await loggingOut;
+      await request;
+
+      // Sent after the browser stored the refreshed cookies, so the server
+      // revokes the refreshed session; no body in cookie mode.
+      expect(logoutRequest().body, isEmpty);
+    });
+
+    test(
+        'native: a request of a new session does not join the refresh of the '
+        'ended one, whose tokens are dropped', () async {
+      final gate = refreshGate = Completer<http.Response>();
+      final client = buildNativeClient();
+
+      pending.complete(jsonResponse(401));
+      final oldRequest = client.httpClient.apiGet('/data');
+      await pumpEventQueue();
+      expect(refreshes(), hasLength(1));
+
+      await client.clearLocalSession();
+      final login = await client.login('b@example.com', 'pw');
+      expect(login.success, isTrue);
+
+      final newRequest = client.httpClient.apiGet('/data');
+      await pumpEventQueue();
+      // Its own refresh, not the old one's result.
+      expect(refreshes(), hasLength(2));
+
+      gate.complete(
+          jsonResponse(200, {'accessToken': 'OLD', 'refreshToken': 'OLDR'}));
+      await Future.wait([oldRequest, newRequest]);
+
+      expect(await storage.readAccessToken(), equals('AT-R'));
+      expect(client.httpClient.logoutBody, equals({'refreshToken': 'RT-R'}));
+    });
+
+    test(
+        'native: the session ends while the retry headers are read -> the '
+        'retry is not sent', () async {
+      // Reads: the request, the refresh, then the retry, which waits.
+      final readGate = Completer<String?>();
+      var reads = 0;
+      final client = buildNativeClient(
+          bearerProvider: () =>
+              ++reads == 3 ? readGate.future : storage.readAccessToken());
+
+      pending.complete(jsonResponse(401));
+      final request = client.httpClient.apiGet('/data');
+      await pumpEventQueue();
+      expect(refreshes(), hasLength(1));
+      expect(reads, equals(3));
+
+      await client.clearLocalSession();
+      readGate.complete('AT-R');
+      final response = await request;
+
+      expect(response.statusCode, equals(401));
+      expect(dataRequests(), hasLength(1));
+    });
+
+    test(
+        'two 401s sharing one failed refresh -> one refresh, one loggedOut',
+        () async {
+      final client = buildCookieClient();
+      final sub = client.events.listen((e) => events.add(e.type));
+      sessionAlive = false; // expired server side
+
+      pending.complete(jsonResponse(401));
+      final a = client.httpClient.apiGet('/data');
+      final b = client.httpClient.get(Uri.parse('https://ita.app/app/data'));
+      await Future.wait([a, b]);
+      await pumpEventQueue();
+      await sub.cancel();
+
+      expect(refreshes(), hasLength(1));
+      expect(events, equals([AuthEventType.loggedOut]));
+    });
+
+    // Regression guard: the csrf cookie expires with the access token (15
+    // minutes) while the refresh cookie lives on, and /refresh is not CSRF
+    // checked. Without a logout, a 403 with no csrf cookie must still refresh
+    // and retry, or every idle web session would end after 15 minutes.
+    test(
+        'cookie mode, no logout, csrf cookie expired -> refresh and retry as '
+        'before', () async {
+      csrfCookie = null;
+      final client = buildCookieClient();
+
+      pending.complete(noAccessToken);
+      await client.httpClient.apiGet('/data');
+
+      expect(refreshes(), hasLength(1));
+      expect(dataRequests(), hasLength(2));
+    });
+
+    test(
+        'a request started after logout, with no new login -> no refresh, no '
+        'second loggedOut', () async {
+      final client = buildCookieClient();
+      final sub = client.events.listen((e) => events.add(e.type));
+      await client.logout();
+
+      pending.complete(noAccessToken);
+      final viaApi = await client.httpClient.apiGet('/data');
+      final viaSend =
+          await client.httpClient.get(Uri.parse('https://ita.app/app/data'));
+      await pumpEventQueue();
+      await sub.cancel();
+
+      expect(viaApi.statusCode, equals(403));
+      expect(viaSend.statusCode, equals(403));
+      expect(refreshes(), isEmpty);
+      expect(events, equals([AuthEventType.loggedOut]));
+    });
+
+    test('checkSession() after logout -> /me 401, no refresh, no second '
+        'loggedOut', () async {
+      final client = buildCookieClient();
+      final sub = client.events.listen((e) => events.add(e.type));
+      await client.logout();
+
+      final user = await client.checkSession();
+      await pumpEventQueue();
+      await sub.cancel();
+
+      expect(user, isNull);
+      expect(refreshes(), isEmpty);
+      expect(events, equals([AuthEventType.loggedOut]));
+    });
+
+    test('after logout and a new login, a 401 refreshes as before', () async {
+      final client = buildCookieClient();
+      await client.logout();
+      final login = await client.login('a@example.com', 'pw');
+      expect(login.success, isTrue);
+
+      pending.complete(jsonResponse(401));
+      await client.httpClient.apiGet('/data');
+
+      expect(refreshes(), hasLength(1));
+      expect(refreshes().single.headers['X-CSRF-Token'], equals('CSRF2'));
+      expect(dataRequests(), hasLength(2));
+    });
+
+    test('native: logout() sends the refresh token in the body', () async {
+      final client = buildNativeClient();
+      await client.login('a@example.com', 'pw');
+      await client.logout();
+
+      expect(jsonDecode(logoutRequest().body), equals({'refreshToken': 'RT-L'}));
+      expect(await storage.readAccessToken(), isNull);
+    });
+
+    test('cookie mode: logout() sends no body', () async {
+      final client = buildCookieClient();
+      await client.login('a@example.com', 'pw');
+      await client.logout();
+
+      expect(logoutRequest().body, isEmpty);
     });
   });
 }
