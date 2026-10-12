@@ -13,12 +13,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - Each change also went through extra asynchronous hops. Under dart2js the `null` from `logout()` had not arrived yet when `logout()` completed, so a subscription cancelled right after it missed the logout.
   - Apps that listen to `userStream` right after creating the client (for example a `StreamBuilder` in the first frame while the startup session check runs) could miss the initial login or logout.
   - `userStream` now reads the current user and subscribes to the changes synchronously in `listen`, and forwards each change as soon as the state delivers it. The first event is still delivered asynchronously, and every event arrives in order. Pause, resume and cancel are forwarded, and `dispose()` still closes the stream.
+- **No refresh for a late 401/403 after the session ended** ([#33](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/33)):
+  - A request still in flight when `logout()`, `clearLocalSession()` or a successful `deleteAccount()` ended the session could get 401/403 (for example 403 `No access token provided`) after the server had cleared the cookies. The client then sent `POST /refresh`, on web without `X-CSRF-Token` because the csrf cookie was gone, and emitted a second `loggedOut` event when that refresh failed.
+  - Once the session has ended locally (`logout()`, `clearLocalSession()`, a successful `deleteAccount()`, a failed refresh), a 401/403 is returned to the caller unchanged until the next successful `GET /me`: no refresh, no retry, no `loggedOut` or `sessionRevoked` event. This covers requests in flight when the session ended and requests started afterwards, such as route guards, polling or `checkSession()`. Every login flow ends with `GET /me`, so the next login restores the usual refresh. This applies to the `api*` methods and to `httpClient.send()`, on web and native.
+  - `logout()` marks the session as ended before it sends `POST /logout`, because the server can clear the cookies before its response arrives.
+  - A refresh in flight when the session ends has its result dropped: on native its tokens are no longer written back to the cleared `TokenStorage` or kept in memory, so a logged-out app no longer sends a fresh `Authorization` header or resumes the session on the next start. The original request is not retried, and the logout callback is not called again. A request of a new session no longer joins a refresh started for the ended one.
+  - `logout()` waits for a refresh in flight before it sends `POST /logout`, so the server revokes the refreshed session. On web the browser stores the refresh response's cookies itself and the client cannot undo that; `clearLocalSession()`, which is local, does not wait, so on web those cookies can still be stored after it.
+  - A retry is not sent when the session ended while its headers were being read.
+  - A refresh with no csrf cookie is still sent when the session was not ended locally. The csrf cookie expires with the access token while the refresh cookie lives on, and `/refresh` is CSRF-exempt on the servers, so this refresh is how an idle web session resumes.
+- **`logout()` sends the refresh token on native** ([#33](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/33)): in bearer mode `POST /logout` carries `{"refreshToken": "..."}`, read before the local tokens are cleared, so the server can revoke the session even when the access token has expired. Both servers accept it. Cookie mode sends no body, as before.
+
+### Changed
+
+- When several requests get 401/403 and share one refresh that fails, `loggedOut` is emitted once instead of once per request.
+- When a refresh fails while `logout()` waits for it, `logout()` sends `POST /logout` but emits no second `loggedOut`.
+- A request of an ended session whose 401/403 arrives after a new login is returned unchanged instead of being refreshed with the new session.
+- The wire protocol is unchanged apart from the optional `refreshToken` in the native `POST /logout` body.
 
 ### Tests
 
 - Added `test/auth_state_test.dart`: no change is lost when made right after `listen`, changes are delivered one microtask after `setUser`, late and multiple subscribers, pause, and `dispose()`.
 - The test "userStream emits user on login and null on logout" now checks the exact sequence (null, user, null).
 - CI runs the whole suite on Chrome with dart2js again, not only the offline token tests.
+- A request in flight across `logout()`, `clearLocalSession()` and `deleteAccount()`, in cookie mode and native, through `apiGet` and `httpClient.get`, resolved with 403 `No access token provided`: no `POST /refresh`, the original error is returned, one `loggedOut` event. The mock server fails `/refresh` once the session is gone, as the real servers do, so the event count is checked.
+- Cookie mode with the csrf cookie cleared by logout: no `POST /refresh` (and no other unsafe request) without `X-CSRF-Token` is sent.
+- A refresh in flight across `clearLocalSession()` and `logout()`: no token written back (native), `logout()` sends `POST /logout` only after the refresh, with the refreshed token in the body (native).
+- A request of a new session does not join the ended session's refresh; a retry is not sent when the session ends while its headers are read.
+- Two 401s sharing one failed refresh: one refresh, one `loggedOut`.
+- After logout with no new login, a 401/403 and `checkSession()` do not refresh and emit no second `loggedOut`; after a new login a 401 refreshes as before.
+- `logout()` sends the refresh token in the body on native and no body in cookie mode.
+- Regression guard: with no logout and an expired csrf cookie the client still refreshes and retries.
 
 ## 1.10.6
 

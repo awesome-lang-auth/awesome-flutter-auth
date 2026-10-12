@@ -69,6 +69,7 @@ abstract class BaseAuthClient implements AuthClient {
   // -------------------------------------------------------------------------
 
   Future<void> handleLogout({bool revoked = false}) async {
+    httpClient.markSessionEnded();
     _state.setUser(null);
     _eventsController.add(AuthEvent(
       type: revoked ? AuthEventType.sessionRevoked : AuthEventType.loggedOut,
@@ -300,9 +301,26 @@ abstract class BaseAuthClient implements AuthClient {
 
   @override
   Future<void> logout() async {
+    // A refresh in flight completes first, so POST /logout revokes the
+    // refreshed session: on web the browser has already stored its cookies,
+    // on native its refresh token goes in the logout body (issue #33).
+    final generation = httpClient.sessionGeneration;
+    await httpClient.waitForRefresh();
+    // A failed refresh may have ended the session meanwhile; its logout
+    // already ran, so only the server call is left.
+    final endedMeanwhile = httpClient.sessionGeneration != generation;
+    // Before POST /logout: the server may clear the cookies before its
+    // response reaches us, and a 401/403 arriving meanwhile for another
+    // request must not trigger a refresh (issue #33).
+    httpClient.markSessionEnded();
+    // Read before handleLogout() clears the tokens. Bearer mode only: the
+    // servers revoke the session by this refresh token when the access
+    // token has expired.
+    final body = httpClient.logoutBody;
     try {
-      await httpClient.apiPost('/logout');
+      await httpClient.apiPost('/logout', body: body);
     } catch (_) {}
+    if (endedMeanwhile) return;
     await handleLogout();
   }
 
@@ -653,6 +671,7 @@ abstract class BaseAuthClient implements AuthClient {
   /// platform-specific cleanup (the token storage on native) is done.
   @override
   Future<void> clearLocalSession() async {
+    httpClient.markSessionEnded();
     httpClient.clearTokens();
     _state.setUser(null);
     _eventsController.add(const AuthEvent(type: AuthEventType.loggedOut));

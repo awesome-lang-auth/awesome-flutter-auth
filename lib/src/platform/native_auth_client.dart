@@ -39,6 +39,8 @@ class NativeAuthClient extends BaseAuthClient {
 
   @override
   Future<void> handleLogout({bool revoked = false}) async {
+    // Before the storage clear, not after it in super (issue #33).
+    httpClient.markSessionEnded();
     httpClient.clearTokens();
     await _storage.clear();
     return super.handleLogout(revoked: revoked);
@@ -53,6 +55,7 @@ class NativeAuthClient extends BaseAuthClient {
   /// `Authorization` header (issue #31).
   @override
   Future<void> clearLocalSession() async {
+    httpClient.markSessionEnded();
     httpClient.clearTokens();
     final clearing = _storage.clear();
     httpClient.waitForTokenClear(clearing);
