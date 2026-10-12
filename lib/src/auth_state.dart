@@ -16,10 +16,27 @@ class AuthState {
   ///
   /// New subscribers always receive the current value immediately upon
   /// subscription, followed by future state changes.
-  Stream<AuthUser?> get userStream async* {
-    yield _currentUser;
-    yield* _controller.stream;
-  }
+  ///
+  /// The current value is read, and the subscription to state changes is
+  /// made, synchronously inside `listen`, so no [setUser] call made after
+  /// `listen` returns is lost (issue #36).
+  Stream<AuthUser?> get userStream => Stream<AuthUser?>.multi((listener) {
+        // Delivered asynchronously, so `listen` returns before the first event.
+        listener.add(_currentUser);
+        final changes = _controller.stream.listen(
+          // The broadcast controller already delivers in a later microtask;
+          // forwarding synchronously avoids a second hop. While the initial
+          // value is still pending, addSync queues behind it, so the order
+          // is kept.
+          listener.addSync,
+          onError: listener.addErrorSync,
+          onDone: listener.closeSync,
+        );
+        listener
+          ..onPause = changes.pause
+          ..onResume = changes.resume
+          ..onCancel = changes.cancel;
+      });
 
   /// The currently authenticated user, or `null` if not authenticated.
   AuthUser? get currentUser => _currentUser;
