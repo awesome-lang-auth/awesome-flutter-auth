@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Fixed
+
+- **`AuthState.userStream` no longer loses or delays state changes** ([#36](https://github.com/awesome-lang-auth/awesome-flutter-auth/issues/36)):
+  - `userStream` was an `async*` generator. It read the current user and subscribed to the changes only once the generator body had run, some microtasks after `listen`. A `setUser` in that window was lost, and the first value could already be the newer user instead of the one at `listen` time. This happened on every platform; the window differs between the VM, dart2js and dart2wasm.
+  - Each change also went through extra asynchronous hops. Under dart2js the `null` from `logout()` had not arrived yet when `logout()` completed, so a subscription cancelled right after it missed the logout.
+  - Apps that listen to `userStream` right after creating the client (for example a `StreamBuilder` in the first frame while the startup session check runs) could miss the initial login or logout.
+  - `userStream` now reads the current user and subscribes to the changes synchronously in `listen`, and forwards each change as soon as the state delivers it. The first event is still delivered asynchronously, and every event arrives in order. Pause, resume and cancel are forwarded, and `dispose()` still closes the stream.
+
+### Tests
+
+- Added `test/auth_state_test.dart`: no change is lost when made right after `listen`, changes are delivered one microtask after `setUser`, late and multiple subscribers, pause, and `dispose()`.
+- The test "userStream emits user on login and null on logout" now checks the exact sequence (null, user, null).
+- CI runs the whole suite on Chrome with dart2js again, not only the offline token tests.
+
 ## 1.10.6
 
 ### Fixed

@@ -386,10 +386,9 @@ void main() {
       await sub.cancel();
 
       // userStream yields the current value on subscription (null before login),
-      // then the user after login, then null after logout.
-      expect(events, hasLength(greaterThanOrEqualTo(2)));
-      expect(events.any((e) => e is AuthUser), isTrue);
-      expect(events.last, isNull);
+      // then the user after login, then null after logout. Every event is
+      // delivered by the time logout() completes (issue #36).
+      expect(events, [isNull, isA<AuthUser>(), isNull]);
     });
 
     test('userStream replays current value to late subscribers', () async {
